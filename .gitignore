@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# repomix output (keep config)
+repomix-output*.xml
+repomix-output*.txt
+!repomix.config.json
+
