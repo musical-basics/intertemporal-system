@@ -13,7 +13,7 @@ export BASE_URL="http://localhost:3000"
 Production URL:
 
 ```bash
-export BASE_URL="https://YOUR_DEPLOYMENT_HOST"
+export BASE_URL="https://intertemporal-system.vercel.app"
 ```
 
 Agent-authenticated endpoints require:
