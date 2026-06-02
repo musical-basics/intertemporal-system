@@ -18,7 +18,6 @@ interface Props {
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const PERIODS: ('morning' | 'evening')[] = ['morning', 'evening']
 const PERIOD_LABELS = { morning: '☀️ AM', evening: '🌙 PM' }
 
 export default function WeekGrid({ blocks, currentBlockId, responsibilities, logCounts }: Props) {
@@ -57,7 +56,7 @@ export default function WeekGrid({ blocks, currentBlockId, responsibilities, log
         <div className="week-grid-period-label">😴 Nap</div>
         {[0,1,2,3,4,5,6].map(day => (
           <div key={`nap_${day}`} className="lionel-card is-rest" style={{ minHeight: 44 }}>
-            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>2pm – 4pm</span>
+            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>2pm - 4pm</span>
           </div>
         ))}
 
@@ -81,7 +80,7 @@ export default function WeekGrid({ blocks, currentBlockId, responsibilities, log
         <div className="week-grid-period-label">🌑 Sleep</div>
         {[0,1,2,3,4,5,6].map(day => (
           <div key={`sleep_${day}`} className="lionel-card is-rest" style={{ minHeight: 44 }}>
-            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>12am – 6am</span>
+            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>12am - 6am</span>
           </div>
         ))}
       </div>

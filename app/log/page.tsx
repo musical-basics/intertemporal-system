@@ -2,9 +2,8 @@ import { BLOCKS, getCurrentBlock, getWeekStart, formatWeekStart } from '@/lib/bl
 import { supabase } from '@/lib/supabase'
 import LogClient from '@/components/LogClient'
 import { Suspense } from 'react'
-import { unstable_noStore as noStore } from 'next/cache'
+import { connection } from 'next/server'
 
-// ─── Static shell — renders in <50ms ────────────────────────────────────────
 export default async function LogPage({
   searchParams,
 }: {
@@ -41,7 +40,6 @@ export default async function LogPage({
   )
 }
 
-// ─── Async data component — only this waits for Supabase ────────────────────
 async function LogDataLoader({
   blockId,
   resolvedWeek,
@@ -53,7 +51,7 @@ async function LogDataLoader({
   thisWeek: string
   currentBlockId: string | null
 }) {
-  noStore()
+  await connection()
 
   let query = supabase
     .from('activity_logs')
@@ -80,7 +78,6 @@ async function LogDataLoader({
   )
 }
 
-// ─── Inline skeleton ─────────────────────────────────────────────────────────
 function LogSkeleton() {
   return (
     <>

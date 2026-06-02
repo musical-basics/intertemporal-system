@@ -1,3 +1,5 @@
+import { Fragment } from 'react'
+
 export default function Loading() {
   return (
     <div>
@@ -24,7 +26,7 @@ export default function Loading() {
           <div key={d} className="week-grid-day-label" style={{ color: 'var(--cream-border)' }}>{d}</div>
         ))}
         {[0,1].map(row => (
-          <>
+          <Fragment key={row}>
             <div key={`label-${row}`} />
             {[0,1,2,3,4,5,6].map(col => (
               <div key={`${row}-${col}`} style={{
@@ -35,7 +37,7 @@ export default function Loading() {
                 opacity: 0.6 + col * 0.04,
               }} />
             ))}
-          </>
+          </Fragment>
         ))}
       </div>
 

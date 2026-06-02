@@ -31,7 +31,7 @@ export default function StatusBanner({ currentBlock, now }: Props) {
         <div className="status-banner-body">
           <div className="status-banner-label">Rest Period</div>
           <div className="status-banner-title">Lionel is resting 💤</div>
-          <div className="status-banner-subtitle">{estDate} · {estTime} EST — No scheduling during rest windows</div>
+          <div className="status-banner-subtitle">{estDate} · {estTime} EST, no scheduling during rest windows</div>
         </div>
       </div>
     )
@@ -46,7 +46,7 @@ export default function StatusBanner({ currentBlock, now }: Props) {
           {currentBlock.label}
         </div>
         <div className="status-banner-subtitle">
-          {estDate} · {estTime} EST · Block runs {currentBlock.period === 'morning' ? '6:00am – 2:00pm' : '4:00pm – 12:00am'}
+          {estDate} · {estTime} EST · Block runs {currentBlock.period === 'morning' ? '6:00am - 2:00pm' : '4:00pm - 12:00am'}
         </div>
       </div>
     </div>

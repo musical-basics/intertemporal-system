@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { getCurrentBlock, getBlockForTime, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
+import { getCurrentBlock, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
 import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
 
 export async function GET(request: NextRequest) {

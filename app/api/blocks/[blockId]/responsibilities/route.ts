@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getBlockById } from '@/lib/blocks'
 import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
+import { createBlockResponsibilitySchema, parseJsonBody } from '@/lib/validation'
 
 export async function GET(
   request: NextRequest,
@@ -49,12 +50,14 @@ export async function POST(
     return Response.json({ error: `Block '${blockId}' not found` }, { status: 404 })
   }
 
-  const body = await request.json()
-  const { title, description, fixed_start_time, fixed_end_time, is_recurring = true } = body
+  const payload = await parseJsonBody(
+    request,
+    createBlockResponsibilitySchema,
+    'Invalid responsibility payload'
+  )
+  if (payload instanceof Response) return payload
 
-  if (!title) {
-    return Response.json({ error: 'title is required' }, { status: 400 })
-  }
+  const { title, description, fixed_start_time, fixed_end_time, is_recurring = true } = payload.data
 
   const { data, error } = await supabase
     .from('responsibilities')

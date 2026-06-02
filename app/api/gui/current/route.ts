@@ -1,10 +1,8 @@
-import { NextRequest } from 'next/server'
-import { supabase } from '@/lib/supabase'
-import { getCurrentBlock, getBlockForTime, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
+import { getCurrentBlock, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
 
 // This GUI endpoint does NOT require bearer auth (for browser-side calls)
 // It's read-only for the current block status
-export async function GET(_request: NextRequest) {
+export async function GET() {
   const now = new Date()
   const block = getCurrentBlock()
   const inRest = isRestPeriod(now)

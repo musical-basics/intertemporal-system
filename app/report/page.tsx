@@ -1,10 +1,10 @@
 import { BLOCKS, getWeekStart, formatWeekStart } from '@/lib/blocks'
 import { supabase } from '@/lib/supabase'
 import ReportClient from '@/components/ReportClient'
+import { buildWeeklyReport } from '@/lib/report'
 import { Suspense } from 'react'
-import { unstable_noStore as noStore } from 'next/cache'
+import { connection } from 'next/server'
 
-// ─── Static shell — renders in <50ms ────────────────────────────────────────
 export default async function ReportPage({
   searchParams,
 }: {
@@ -21,7 +21,7 @@ export default async function ReportPage({
         <p className="page-header-eyebrow">Productivity Report</p>
         <h1 className="page-title">Which Lionels are thriving?</h1>
         <p className="page-subtitle">
-          Compare productivity across your 14 blocks — see who's swamped, who has capacity, and how your week is really distributed.
+          Compare productivity across your 14 blocks and see who is swamped, balanced, busy, or open.
         </p>
       </div>
 
@@ -32,11 +32,10 @@ export default async function ReportPage({
   )
 }
 
-// ─── Async data component — only this waits for Supabase ────────────────────
 async function ReportDataLoader({ weekStart, thisWeek }: { weekStart: string; thisWeek: string }) {
-  noStore()
+  await connection()
 
-  const [{ data: logs }, { data: responsibilitiesData }] = await Promise.all([
+  const [{ data: logs }, { data: responsibilities }] = await Promise.all([
     supabase
       .from('activity_logs')
       .select('block_id, duration_minutes, logged_at, activity')
@@ -48,66 +47,21 @@ async function ReportDataLoader({ weekStart, thisWeek }: { weekStart: string; th
       .eq('is_recurring', true)
   ])
 
-  const responsibilities = responsibilitiesData ?? []
-
-  const byBlock: Record<string, { total_logs: number; total_minutes: number; capacity_minutes: number; committed_minutes: number; remaining_minutes: number; utilization: number; status: 'open' | 'balanced' | 'busy' | 'swamped'; activities: string[] }> = {}
-  
-  for (const log of logs ?? []) {
-    if (!byBlock[log.block_id]) {
-      byBlock[log.block_id] = { total_logs: 0, total_minutes: 0, capacity_minutes: 480, committed_minutes: 0, remaining_minutes: 0, utilization: 0, status: 'open', activities: [] }
-    }
-    byBlock[log.block_id].total_logs++
-    byBlock[log.block_id].total_minutes += log.duration_minutes ?? 0
-    byBlock[log.block_id].activities.push(log.activity)
-  }
-
-  // Add responsibilities
-  for (const resp of responsibilities) {
-    if (!byBlock[resp.block_id]) {
-       byBlock[resp.block_id] = { total_logs: 0, total_minutes: 0, capacity_minutes: 480, committed_minutes: 0, remaining_minutes: 0, utilization: 0, status: 'open', activities: [] }
-    }
-    if (resp.fixed_start_time && resp.fixed_end_time) {
-       const [startH, startM] = resp.fixed_start_time.split(':').map(Number)
-       const [endH, endM] = resp.fixed_end_time.split(':').map(Number)
-       const duration = (endH * 60 + endM) - (startH * 60 + startM)
-       byBlock[resp.block_id].committed_minutes += Math.max(0, duration)
-    }
-  }
-
-  // Compute final metrics
-  for (const blockId of Object.keys(byBlock)) {
-    const b = byBlock[blockId]
-    const allocatedMinutes = b.total_minutes + b.committed_minutes
-    b.remaining_minutes = Math.max(0, b.capacity_minutes - allocatedMinutes)
-    b.utilization = Math.min(1, allocatedMinutes / b.capacity_minutes)
-
-    if (b.utilization >= 0.88 || b.remaining_minutes <= 45) {
-      b.status = 'swamped'
-    } else if (b.utilization >= 0.68) {
-      b.status = 'busy'
-    } else if (b.utilization <= 0.25) {
-      b.status = 'open'
-    } else {
-      b.status = 'balanced'
-    }
-  }
-
-  const totalLogs = (logs ?? []).length
-  const totalMinutes = (logs ?? []).reduce((s, l) => s + (l.duration_minutes ?? 0), 0)
+  const report = buildWeeklyReport(logs ?? [], responsibilities ?? [], weekStart)
 
   return (
     <ReportClient
       blocks={BLOCKS}
-      byBlock={byBlock}
-      totalLogs={totalLogs}
-      totalMinutes={totalMinutes}
+      byBlock={report.by_block}
+      totalLogs={report.total_logs}
+      totalMinutes={report.total_minutes}
+      totals={report.totals}
       weekStart={weekStart}
       thisWeek={thisWeek}
     />
   )
 }
 
-// ─── Inline skeleton ─────────────────────────────────────────────────────────
 function ReportSkeleton() {
   return (
     <>

@@ -1,9 +1,9 @@
 -- ============================================================
--- Intertemporal System — Supabase Schema
+-- Intertemporal System - Supabase Schema
 -- Run this manually in the Supabase SQL Editor
 -- ============================================================
 
--- 1. BLOCKS (static seed — 14 rows)
+-- 1. BLOCKS (static seed - 14 rows)
 CREATE TABLE IF NOT EXISTS blocks (
   id TEXT PRIMARY KEY,           -- e.g. 'mon_morning'
   label TEXT NOT NULL,           -- 'Monday Morning Lionel'
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   duration_minutes INT,                           -- 10
   source TEXT NOT NULL DEFAULT 'gui'              -- 'agent' | 'gui'
     CHECK (source IN ('agent', 'gui')),
+  shift_status TEXT NOT NULL DEFAULT 'active'     -- 'active' | 'nap' | 'sleep'
+    CHECK (shift_status IN ('active', 'nap', 'sleep')),
   notes TEXT,
   week_start DATE NOT NULL,       -- Monday of that week (for grouping)
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -79,7 +81,7 @@ INSERT INTO responsibilities (block_id, title, description, fixed_start_time, fi
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- Row Level Security (optional — enable if using anon access)
+-- Row Level Security (optional - enable if using anon access)
 -- ============================================================
 -- ALTER TABLE blocks ENABLE ROW LEVEL SECURITY;
 -- ALTER TABLE responsibilities ENABLE ROW LEVEL SECURITY;

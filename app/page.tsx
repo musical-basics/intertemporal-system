@@ -2,42 +2,30 @@ import { BLOCKS, getCurrentBlock, getWeekStart, formatWeekStart } from '@/lib/bl
 import { supabase } from '@/lib/supabase'
 import WeekGrid from '@/components/WeekGrid'
 import StatusBanner from '@/components/StatusBanner'
-import { Suspense } from 'react'
+import { Fragment, Suspense } from 'react'
 import { format, addDays } from 'date-fns'
-import { unstable_noStore as noStore } from 'next/cache'
+import { connection } from 'next/server'
 
-interface Responsibility {
-  id: string
-  block_id: string
-  title: string
-  fixed_start_time?: string
-  fixed_end_time?: string
-}
-
-// ─── Static shell renders instantly ──────────────────────────────────────────
-// Only the WeekDataLoader below is async — it streams in via Suspense
 export default function DashboardPage() {
   const now = new Date()
   const currentBlock = getCurrentBlock()
   const weekStart = formatWeekStart(getWeekStart(now))
   const weekStartDate = new Date(weekStart + 'T00:00:00')
   const weekEndDate = addDays(weekStartDate, 6)
-  const weekLabel = `${format(weekStartDate, 'MMM d')} – ${format(weekEndDate, 'MMM d, yyyy')}`
+  const weekLabel = `${format(weekStartDate, 'MMM d')} - ${format(weekEndDate, 'MMM d, yyyy')}`
 
   return (
     <>
-      {/* Header and status banner — no DB needed, renders immediately */}
       <div className="page-header">
         <p className="page-header-eyebrow">Week of {weekLabel}</p>
         <h1 className="page-title">Your 14 Lionels</h1>
         <p className="page-subtitle">
-          Every morning and evening is a distinct version of you — each with their own responsibilities, energy, and capacity.
+          Every morning and evening is a distinct version of you - each with their own responsibilities, energy, and capacity.
         </p>
       </div>
 
       <StatusBanner currentBlock={currentBlock} now={now.toISOString()} />
 
-      {/* Grid shell is static — data streams in via Suspense */}
       <Suspense fallback={<WeekGridSkeleton />}>
         <WeekDataLoader weekStart={weekStart} currentBlock={currentBlock} weekLabel={weekLabel} />
       </Suspense>
@@ -45,7 +33,6 @@ export default function DashboardPage() {
   )
 }
 
-// ─── Async data component (only this waits for Supabase) ─────────────────────
 async function WeekDataLoader({
   weekStart,
   currentBlock,
@@ -55,7 +42,7 @@ async function WeekDataLoader({
   currentBlock: ReturnType<typeof getCurrentBlock>
   weekLabel: string
 }) {
-  noStore() // opt out of full-route cache for this component only
+  await connection()
 
   const [{ data: responsibilities }, { data: logs }] = await Promise.all([
     supabase
@@ -84,7 +71,6 @@ async function WeekDataLoader({
   )
 }
 
-// ─── Inline skeleton for the grid while data loads ───────────────────────────
 function WeekGridSkeleton() {
   return (
     <div className="week-grid">
@@ -93,7 +79,7 @@ function WeekGridSkeleton() {
         <div key={d} className="week-grid-day-label" style={{ color: 'var(--cream-border)' }}>{d}</div>
       ))}
       {[0, 1].map(row => (
-        <>
+        <Fragment key={row}>
           <div key={`lbl-${row}`} />
           {[0,1,2,3,4,5,6].map(col => (
             <div key={`${row}-${col}`} style={{
@@ -105,7 +91,7 @@ function WeekGridSkeleton() {
               opacity: 0.7,
             }} />
           ))}
-        </>
+        </Fragment>
       ))}
     </div>
   )

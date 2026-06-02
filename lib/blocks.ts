@@ -1,9 +1,18 @@
-import { toZonedTime, fromZonedTime } from 'date-fns-tz'
+import { toZonedTime } from 'date-fns-tz'
 import { startOfWeek } from 'date-fns'
 
 export const TIMEZONE = 'America/New_York'
 
 export type Period = 'morning' | 'evening'
+export type ShiftStatus = 'active' | 'nap' | 'sleep'
+
+export const MINUTES_PER_DAY = 24 * 60
+export const MORNING_START = 6 * 60
+export const MORNING_END = 14 * 60
+export const NAP_START = 14 * 60
+export const NAP_END = 16 * 60
+export const EVENING_START = 16 * 60
+export const EVENING_END = 24 * 60
 
 export interface Block {
   id: string
@@ -16,7 +25,7 @@ export interface Block {
   emoji: string
 }
 
-// The canonical 14 blocks — mirrors the DB seed data
+// The canonical 14 blocks, mirroring the DB seed data.
 export const BLOCKS: Block[] = [
   { id: 'sun_morning', label: 'Sunday Morning Lionel',    day_of_week: 0, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#7C6CAF', emoji: '⛪' },
   { id: 'sun_evening', label: 'Sunday Evening Lionel',    day_of_week: 0, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#9B59B6', emoji: '🌆' },
@@ -37,60 +46,106 @@ export const BLOCKS: Block[] = [
 const DAY_PREFIX = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
 /**
- * Determines if a given UTC timestamp falls in a rest period (nap or night sleep) in EST.
- * Rest windows: 02:00–06:00 (night), 14:00–16:00 (nap)
+ * Determines whether a UTC timestamp falls in a rest period in Eastern time.
+ * Rest windows: 00:00-06:00 sleep, 14:00-16:00 nap.
  */
 export function isRestPeriod(utcDate: Date = new Date()): boolean {
-  const est = toZonedTime(utcDate, TIMEZONE)
-  const hours = est.getHours()
-  const minutes = est.getMinutes()
-  const totalMinutes = hours * 60 + minutes
-
-  // Night sleep: 00:00 to 06:00 (0 to 360 min)
-  if (totalMinutes < 6 * 60) return true
-  // Nap: 14:00 to 16:00 (840 to 960 min)
-  if (totalMinutes >= 14 * 60 && totalMinutes < 16 * 60) return true
-  return false
+  return getShiftStatusForTime(utcDate) !== 'active'
 }
 
 /**
- * Get the block ID for a given UTC timestamp in EST.
- * Returns null if currently in a rest period.
+ * Get the block ID that owns a timestamp in Eastern time.
+ * Nap maps to that day's morning block. Sleep maps to the previous day's evening block.
  */
-export function getBlockIdForTime(utcDate: Date = new Date()): string | null {
-  if (isRestPeriod(utcDate)) return null
+export function getBlockIdForTime(utcDate: Date = new Date()): string {
+  const { dayOfWeek, minuteOfDay } = getEasternParts(utcDate)
 
-  const est = toZonedTime(utcDate, TIMEZONE)
-  const dayOfWeek = est.getDay() // 0=Sun
-  const hours = est.getHours()
-  const totalMinutes = hours * 60 + est.getMinutes()
-
-  const dayPrefix = DAY_PREFIX[dayOfWeek]
-  let period: Period
-
-  if (totalMinutes >= 6 * 60 && totalMinutes < 14 * 60) {
-    period = 'morning'
-  } else {
-    period = 'evening'
+  if (minuteOfDay >= MORNING_START && minuteOfDay < NAP_END) {
+    return `${DAY_PREFIX[dayOfWeek]}_morning`
   }
 
-  return `${dayPrefix}_${period}`
+  if (minuteOfDay >= EVENING_START) {
+    return `${DAY_PREFIX[dayOfWeek]}_evening`
+  }
+
+  const previousDay = (dayOfWeek + 6) % 7
+  return `${DAY_PREFIX[previousDay]}_evening`
 }
 
 /**
- * Get the full Block object for a given UTC timestamp.
+ * Get the block ID only when a timestamp is inside an active shift.
  */
-export function getBlockForTime(utcDate: Date = new Date()): Block | null {
+export function getActiveBlockIdForTime(utcDate: Date = new Date()): string | null {
+  if (isRestPeriod(utcDate)) return null
+  return getBlockIdForTime(utcDate)
+}
+
+/**
+ * Get the attributed Block object for a given UTC timestamp.
+ */
+export function getBlockForTime(utcDate: Date = new Date()): Block {
   const blockId = getBlockIdForTime(utcDate)
-  if (!blockId) return null
-  return BLOCKS.find(b => b.id === blockId) ?? null
+  const block = getBlockById(blockId)
+  if (!block) throw new Error(`No block found for ${utcDate.toISOString()}`)
+  return block
+}
+
+/**
+ * Get the active Block object for a timestamp, or null during rest periods.
+ */
+export function getActiveBlockForTime(utcDate: Date = new Date()): Block | null {
+  const blockId = getActiveBlockIdForTime(utcDate)
+  return blockId ? getBlockById(blockId) ?? null : null
 }
 
 /**
  * Get the current active block (right now in EST).
  */
 export function getCurrentBlock(): Block | null {
-  return getBlockForTime(new Date())
+  return getActiveBlockForTime(new Date())
+}
+
+export type BlockResolution = {
+  block_id: string
+  block: Block
+  shift_status: ShiftStatus
+  timezone: typeof TIMEZONE
+}
+
+export function resolveBlockForTime(utcDate: Date = new Date()): BlockResolution {
+  const block_id = getBlockIdForTime(utcDate)
+  const block = getBlockById(block_id)
+
+  if (!block) throw new Error(`No block found for ${utcDate.toISOString()}`)
+
+  return {
+    block_id,
+    block,
+    shift_status: getShiftStatusForTime(utcDate),
+    timezone: TIMEZONE,
+  }
+}
+
+export function getShiftStatusForTime(utcDate: Date = new Date()): ShiftStatus {
+  const { minuteOfDay } = getEasternParts(utcDate)
+
+  if (minuteOfDay >= MORNING_START && minuteOfDay < MORNING_END) return 'active'
+  if (minuteOfDay >= NAP_START && minuteOfDay < NAP_END) return 'nap'
+  if (minuteOfDay >= EVENING_START && minuteOfDay < EVENING_END) return 'active'
+  return 'sleep'
+}
+
+function getEasternParts(utcDate: Date) {
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const hour = est.getHours()
+  const minute = est.getMinutes()
+
+  return {
+    dayOfWeek: est.getDay(),
+    hour,
+    minute,
+    minuteOfDay: hour * 60 + minute,
+  }
 }
 
 /**
@@ -99,7 +154,22 @@ export function getCurrentBlock(): Block | null {
 export function getWeekStart(utcDate: Date = new Date()): Date {
   const est = toZonedTime(utcDate, TIMEZONE)
   const monday = startOfWeek(est, { weekStartsOn: 1 })
-  // Return as a plain date (no TZ shift) — just year/month/day
+  // Return as a plain date with no timezone shift, just year/month/day.
+  return new Date(monday.getFullYear(), monday.getMonth(), monday.getDate())
+}
+
+/**
+ * Get the week containing the attributed block date for a timestamp.
+ * Sleep belongs to the previous day's evening block.
+ */
+export function getAttributedWeekStart(utcDate: Date = new Date()): Date {
+  const est = toZonedTime(utcDate, TIMEZONE)
+
+  if (getShiftStatusForTime(utcDate) === 'sleep') {
+    est.setDate(est.getDate() - 1)
+  }
+
+  const monday = startOfWeek(est, { weekStartsOn: 1 })
   return new Date(monday.getFullYear(), monday.getMonth(), monday.getDate())
 }
 
@@ -117,14 +187,14 @@ export function formatWeekStart(date: Date): string {
  * Get a human-readable rest period label.
  */
 export function getRestPeriodLabel(utcDate: Date = new Date()): string {
-  const est = toZonedTime(utcDate, TIMEZONE)
-  const hours = est.getHours()
-  if (hours < 6) return 'Night Sleep (12am–6am)'
-  return 'Afternoon Nap (2pm–4pm)'
+  const status = getShiftStatusForTime(utcDate)
+  if (status === 'sleep') return 'Night Sleep (12am-6am)'
+  if (status === 'nap') return 'Afternoon Nap (2pm-4pm)'
+  return 'Active shift'
 }
 
 /**
- * Get all 14 blocks in order (Sun–Sat, morning first).
+ * Get all 14 blocks in order, Sunday through Saturday, morning first.
  */
 export function getAllBlocks(): Block[] {
   return BLOCKS
@@ -142,6 +212,7 @@ export type ScheduleResolution =
       status: "active"
       timezone: typeof TIMEZONE
       at: string
+      minuteOfDay: number
       block: Block
       windowLabel: string
       canSchedule: true
@@ -151,6 +222,7 @@ export type ScheduleResolution =
       status: "blackout"
       timezone: typeof TIMEZONE
       at: string
+      minuteOfDay: number
       blackout: "sleep" | "nap"
       windowLabel: string
       canSchedule: false
@@ -166,10 +238,10 @@ export function getScheduleResolution(utcDate: Date): ScheduleResolution {
   const base = {
     timezone: TIMEZONE as typeof TIMEZONE,
     at: utcDate.toISOString(),
+    minuteOfDay: totalMinutes,
   }
 
-  // Night sleep: 00:00 to 06:00
-  if (totalMinutes < 6 * 60) {
+  if (totalMinutes < MORNING_START) {
     return {
       ...base,
       status: "blackout",
@@ -180,8 +252,7 @@ export function getScheduleResolution(utcDate: Date): ScheduleResolution {
     }
   }
 
-  // Nap: 14:00 to 16:00
-  if (totalMinutes >= 14 * 60 && totalMinutes < 16 * 60) {
+  if (totalMinutes >= NAP_START && totalMinutes < NAP_END) {
     return {
       ...base,
       status: "blackout",
@@ -192,8 +263,9 @@ export function getScheduleResolution(utcDate: Date): ScheduleResolution {
     }
   }
 
-  const block = getBlockForTime(utcDate)
-  if (!block) throw new Error(`No block found for ${utcDate.toISOString()}`)
+  const blockId = getActiveBlockIdForTime(utcDate)
+  const block = blockId ? getBlockById(blockId) : null
+  if (!block) throw new Error(`No active block found for ${utcDate.toISOString()}`)
 
   const formatTime = (timeStr: string) => {
     const [h, m] = timeStr.split(':').map(Number)
@@ -235,7 +307,36 @@ export type ScheduleCheck = {
   touchedBlocks: string[]
 }
 
-export function checkScheduleWindow(startAt: string, endAt: string, responsibilities: any[]): ScheduleCheck {
+export type ScheduleResponsibility = {
+  block_id: string
+  title: string
+  fixed_start_time?: string | null
+  fixed_end_time?: string | null
+}
+
+export function timeStringToMinutes(value?: string | null): number | null {
+  if (!value) return null
+  const [hour, minute] = value.split(':').map(Number)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour * 60 + minute
+}
+
+export function minutesBetweenTimes(start?: string | null, end?: string | null): number {
+  const startMinute = timeStringToMinutes(start)
+  const endMinute = timeStringToMinutes(end)
+
+  if (startMinute == null || endMinute == null) return 0
+
+  let duration = endMinute - startMinute
+  if (duration <= 0) duration += MINUTES_PER_DAY
+  return Math.max(0, duration)
+}
+
+export function checkScheduleWindow(
+  startAt: string,
+  endAt: string,
+  responsibilities: ScheduleResponsibility[]
+): ScheduleCheck {
   const start = new Date(startAt)
   const end = new Date(endAt)
 
@@ -264,19 +365,22 @@ export function checkScheduleWindow(startAt: string, endAt: string, responsibili
 
     touchedBlocks.add(resolution.block.label)
 
-    const est = toZonedTime(sample, TIMEZONE)
-    const minuteOfDay = est.getHours() * 60 + est.getMinutes()
+    const minuteOfDay = resolution.minuteOfDay
 
     const overlapping = responsibilities.find((responsibility) => {
       if (responsibility.block_id !== resolution.block.id) return false
       if (!responsibility.fixed_start_time || !responsibility.fixed_end_time) return false
 
-      const [startH, startM] = responsibility.fixed_start_time.split(':').map(Number)
-      const [endH, endM] = responsibility.fixed_end_time.split(':').map(Number)
-      const startMinute = startH * 60 + startM
-      const endMinute = endH * 60 + endM
+      const startMinute = timeStringToMinutes(responsibility.fixed_start_time)
+      const rawEndMinute = timeStringToMinutes(responsibility.fixed_end_time)
+      if (startMinute == null || rawEndMinute == null) return false
 
-      return minuteOfDay >= startMinute && minuteOfDay < endMinute
+      const endMinute = rawEndMinute <= startMinute ? rawEndMinute + MINUTES_PER_DAY : rawEndMinute
+      const checkedMinute = minuteOfDay < startMinute && endMinute > MINUTES_PER_DAY
+        ? minuteOfDay + MINUTES_PER_DAY
+        : minuteOfDay
+
+      return checkedMinute >= startMinute && checkedMinute < endMinute
     })
 
     if (overlapping) {

@@ -2,7 +2,7 @@
   "output": {
     "filePath": "repomix-output.xml",
     "style": "xml",
-    "headerText": "Intertemporal Scheduling System — Full codebase for AI context.\nNext.js 16 + Supabase + TypeScript.\nKey concepts: 14 weekly Lionel blocks (7 mornings + 7 evenings, EST timezone), activity logging, agent API, productivity reporting.",
+    "headerText": "Intertemporal Scheduling System - Full codebase for AI context.\nNext.js 16 + Supabase + TypeScript.\nKey concepts: 14 weekly Lionel blocks (7 mornings + 7 evenings, EST timezone), activity logging, agent API, productivity reporting.",
     "removeComments": false,
     "removeEmptyLines": false,
     "showLineNumbers": false,
@@ -38,7 +38,9 @@
       "eslint.config.mjs",
       ".env.local",
       "**/*.tsbuildinfo",
-      "**/*.log"
+      "**/*.log",
+      "*repomix*",
+      "**/*repomix*"
     ]
   }
 }

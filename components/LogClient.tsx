@@ -2,8 +2,8 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Block, getBlockById } from '@/lib/blocks'
-import { format, parseISO } from 'date-fns'
-import { Send, Clock, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
+import { format } from 'date-fns'
+import { Send, Clock, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface Log {
   id: string
@@ -29,7 +29,7 @@ function getWeekRange(weekStart: string) {
   const d = new Date(weekStart + 'T00:00:00')
   const end = new Date(d)
   end.setDate(d.getDate() + 6)
-  return `${format(d, 'MMM d')} – ${format(end, 'MMM d, yyyy')}`
+  return `${format(d, 'MMM d')} - ${format(end, 'MMM d, yyyy')}`
 }
 
 function addWeeks(weekStart: string, n: number): string {
@@ -42,7 +42,7 @@ export default function LogClient({
   initialLogs, blocks, currentBlockId, selectedBlockId, weekStart, thisWeek
 }: Props) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
   const [logs, setLogs] = useState<Log[]>(initialLogs)
 
   // Quick-log form state
@@ -96,7 +96,7 @@ export default function LogClient({
       {/* Quick Log Form */}
       <form className="quick-log-form" onSubmit={handleSubmit}>
         <div className="quick-log-title">
-          {block ? `${block.emoji} Quick Log — ${block.label}` : '⚡ Quick Log'}
+          {block ? `${block.emoji} Quick Log - ${block.label}` : '⚡ Quick Log'}
         </div>
         <div className="form-row" style={{ marginBottom: 12 }}>
           <div className="form-field grow">
@@ -243,7 +243,7 @@ export default function LogClient({
                       <div className="activity-text">{log.activity}</div>
                       {log.notes && (
                         <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                          "{log.notes}"
+                          {log.notes}
                         </div>
                       )}
                       <div className="activity-meta">
