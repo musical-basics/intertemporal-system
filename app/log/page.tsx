@@ -68,6 +68,7 @@ async function LogDataLoader({
 
   return (
     <LogClient
+      key={`${blockId}:${resolvedWeek}`}
       initialLogs={data ?? []}
       blocks={BLOCKS}
       currentBlockId={currentBlockId}

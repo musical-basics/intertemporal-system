@@ -44,11 +44,14 @@ export default function LogClient({
   const router = useRouter()
   const [, startTransition] = useTransition()
   const [logs, setLogs] = useState<Log[]>(initialLogs)
+  const defaultLogBlockId = selectedBlockId !== 'all'
+    ? selectedBlockId
+    : currentBlockId ?? 'mon_morning'
 
   // Quick-log form state
   const [activity, setActivity] = useState('')
   const [duration, setDuration] = useState('')
-  const [logBlockId, setLogBlockId] = useState(currentBlockId ?? 'mon_morning')
+  const [logBlockId, setLogBlockId] = useState(defaultLogBlockId)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
@@ -77,7 +80,9 @@ export default function LogClient({
 
       const data = await res.json()
       if (res.ok && data.log) {
-        setLogs(prev => [data.log, ...prev])
+        if (selectedBlockId === 'all' || data.log.block_id === selectedBlockId) {
+          setLogs(prev => [data.log, ...prev])
+        }
         setSuccessMsg(`Logged under ${data.resolved_block?.label ?? 'your block'} ✓`)
         setActivity('')
         setDuration('')
