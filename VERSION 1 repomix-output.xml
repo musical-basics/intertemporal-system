@@ -1,0 +1,3159 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files and files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+- Pay special attention to the Repository Description. These contain important context and guidelines specific to this project.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: app/**/*.ts, app/**/*.tsx, app/**/*.css, components/**/*.tsx, lib/**/*.ts, supabase/**/*.sql, next.config.ts, tsconfig.json, package.json, .env.local.example
+- Files matching these patterns are excluded: node_modules/**, .next/**, pnpm-lock.yaml, pnpm-workspace.yaml, tsconfig.tsbuildinfo, next-env.d.ts, public/**, app/page.module.css, AGENTS.md, CLAUDE.md, README.md, eslint.config.mjs, .env.local, **/*.tsbuildinfo, **/*.log
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<user_provided_header>
+Intertemporal Scheduling System — Full codebase for AI context.
+Next.js 16 + Supabase + TypeScript.
+Key concepts: 14 weekly Lionel blocks (7 mornings + 7 evenings, EST timezone), activity logging, agent API, productivity reporting.
+</user_provided_header>
+
+<directory_structure>
+app/
+  api/
+    blocks/
+      [blockId]/
+        responsibilities/
+          route.ts
+      current/
+        route.ts
+    gui/
+      current/
+        route.ts
+      logs/
+        route.ts
+    logs/
+      route.ts
+    report/
+      route.ts
+  log/
+    loading.tsx
+    page.tsx
+  report/
+    loading.tsx
+    page.tsx
+  globals.css
+  layout.tsx
+  loading.tsx
+  page.tsx
+components/
+  LionelCard.tsx
+  LogClient.tsx
+  NavBar.tsx
+  ReportClient.tsx
+  StatusBanner.tsx
+  WeekGrid.tsx
+lib/
+  auth-middleware.ts
+  blocks.ts
+  supabase.ts
+supabase/
+  schema.sql
+next.config.ts
+package.json
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/api/blocks/[blockId]/responsibilities/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getBlockById } from '@/lib/blocks'
+import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ blockId: string }> }
+) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const { blockId } = await params
+  const block = getBlockById(blockId)
+  if (!block) {
+    return Response.json({ error: `Block '${blockId}' not found` }, { status: 404 })
+  }
+
+  const { data, error } = await supabase
+    .from('responsibilities')
+    .select('*')
+    .eq('block_id', blockId)
+    .order('fixed_start_time', { ascending: true })
+
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 })
+  }
+
+  return Response.json({
+    block: {
+      id: block.id,
+      label: block.label,
+      period: block.period,
+      day_of_week: block.day_of_week,
+      emoji: block.emoji,
+    },
+    responsibilities: data ?? [],
+  })
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ blockId: string }> }
+) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const { blockId } = await params
+  const block = getBlockById(blockId)
+  if (!block) {
+    return Response.json({ error: `Block '${blockId}' not found` }, { status: 404 })
+  }
+
+  const body = await request.json()
+  const { title, description, fixed_start_time, fixed_end_time, is_recurring = true } = body
+
+  if (!title) {
+    return Response.json({ error: 'title is required' }, { status: 400 })
+  }
+
+  const { data, error } = await supabase
+    .from('responsibilities')
+    .insert({ block_id: blockId, title, description, fixed_start_time, fixed_end_time, is_recurring })
+    .select()
+    .single()
+
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+  return Response.json(data, { status: 201 })
+}
+</file>
+
+<file path="app/api/blocks/current/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getCurrentBlock, getBlockForTime, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
+import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
+
+export async function GET(request: NextRequest) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const now = new Date()
+  const block = getCurrentBlock()
+  const inRest = isRestPeriod(now)
+  const weekStart = formatWeekStart(getWeekStart(now))
+
+  if (inRest) {
+    return Response.json({
+      is_rest_period: true,
+      rest_label: getRestPeriodLabel(now),
+      block: null,
+      responsibilities: [],
+      recent_logs: [],
+      week_start: weekStart,
+      timestamp: now.toISOString(),
+    })
+  }
+
+  if (!block) {
+    return Response.json({ error: 'Could not determine current block' }, { status: 500 })
+  }
+
+  const [respResult, logsResult] = await Promise.all([
+    supabase
+      .from('responsibilities')
+      .select('*')
+      .eq('block_id', block.id)
+      .order('fixed_start_time', { ascending: true }),
+    supabase
+      .from('activity_logs')
+      .select('*')
+      .eq('block_id', block.id)
+      .eq('week_start', weekStart)
+      .order('logged_at', { ascending: false })
+      .limit(10),
+  ])
+
+  return Response.json({
+    is_rest_period: false,
+    rest_label: null,
+    block: {
+      id: block.id,
+      label: block.label,
+      period: block.period,
+      day_of_week: block.day_of_week,
+      emoji: block.emoji,
+      color: block.color,
+    },
+    responsibilities: respResult.data ?? [],
+    recent_logs: logsResult.data ?? [],
+    week_start: weekStart,
+    timestamp: now.toISOString(),
+  })
+}
+</file>
+
+<file path="app/api/gui/current/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getCurrentBlock, getBlockForTime, isRestPeriod, getRestPeriodLabel, formatWeekStart, getWeekStart } from '@/lib/blocks'
+
+// This GUI endpoint does NOT require bearer auth (for browser-side calls)
+// It's read-only for the current block status
+export async function GET(_request: NextRequest) {
+  const now = new Date()
+  const block = getCurrentBlock()
+  const inRest = isRestPeriod(now)
+  const weekStart = formatWeekStart(getWeekStart(now))
+
+  if (inRest) {
+    return Response.json({
+      is_rest_period: true,
+      rest_label: getRestPeriodLabel(now),
+      block: null,
+    })
+  }
+
+  if (!block) {
+    return Response.json({ error: 'Could not determine current block' }, { status: 500 })
+  }
+
+  return Response.json({
+    is_rest_period: false,
+    rest_label: null,
+    block: {
+      id: block.id,
+      label: block.label,
+      period: block.period,
+      emoji: block.emoji,
+      color: block.color,
+    },
+    week_start: weekStart,
+  })
+}
+</file>
+
+<file path="app/api/gui/logs/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getBlockIdForTime, getBlockById, formatWeekStart, getWeekStart } from '@/lib/blocks'
+
+// GUI-facing log creation (no bearer token — server validates differently)
+// This is a server action alternative via route. Minimal auth: same-origin only.
+export async function POST(request: NextRequest) {
+  const body = await request.json()
+  const { activity, duration_minutes, block_id, notes } = body
+
+  if (!activity?.trim()) {
+    return Response.json({ error: "'activity' is required" }, { status: 400 })
+  }
+
+  const loggedAt = new Date()
+  const resolvedBlockId = block_id ?? getBlockIdForTime(loggedAt)
+
+  if (!resolvedBlockId) {
+    return Response.json({ error: 'Could not determine block' }, { status: 422 })
+  }
+
+  const block = getBlockById(resolvedBlockId)
+  if (!block) {
+    return Response.json({ error: `Block not found: ${resolvedBlockId}` }, { status: 404 })
+  }
+
+  const weekStart = formatWeekStart(getWeekStart(loggedAt))
+
+  const { data, error } = await supabase
+    .from('activity_logs')
+    .insert({
+      block_id: resolvedBlockId,
+      logged_at: loggedAt.toISOString(),
+      activity: activity.trim(),
+      duration_minutes: duration_minutes ?? null,
+      source: 'gui',
+      notes: notes?.trim() || null,
+      week_start: weekStart,
+    })
+    .select()
+    .single()
+
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  return Response.json({
+    log: data,
+    resolved_block: { id: block.id, label: block.label, emoji: block.emoji },
+    message: `Logged under ${block.label}: "${activity}"`,
+  }, { status: 201 })
+}
+</file>
+
+<file path="app/api/logs/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { getBlockForTime, getBlockById, isRestPeriod, formatWeekStart, getWeekStart, getBlockIdForTime } from '@/lib/blocks'
+import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
+
+// GET /api/logs?block_id=mon_evening&week_start=2026-06-01&limit=50&source=agent
+export async function GET(request: NextRequest) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const { searchParams } = new URL(request.url)
+  const blockId = searchParams.get('block_id')
+  const weekStart = searchParams.get('week_start')
+  const source = searchParams.get('source')
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200)
+
+  let query = supabase
+    .from('activity_logs')
+    .select('*')
+    .order('logged_at', { ascending: false })
+    .limit(limit)
+
+  if (blockId) query = query.eq('block_id', blockId)
+  if (weekStart) query = query.eq('week_start', weekStart)
+  if (source) query = query.eq('source', source)
+
+  const { data, error } = await query
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  return Response.json({ logs: data ?? [], count: data?.length ?? 0 })
+}
+
+// POST /api/logs
+// Body: { activity, duration_minutes?, logged_at?, notes?, block_id? }
+export async function POST(request: NextRequest) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const body = await request.json()
+  const { activity, duration_minutes, logged_at, notes, block_id } = body
+
+  if (!activity || typeof activity !== 'string') {
+    return Response.json({ error: "'activity' (string) is required" }, { status: 400 })
+  }
+
+  // Determine the timestamp for this log entry
+  const loggedAt = logged_at ? new Date(logged_at) : new Date()
+  if (isNaN(loggedAt.getTime())) {
+    return Response.json({ error: "'logged_at' must be a valid ISO 8601 timestamp" }, { status: 400 })
+  }
+
+  // Determine which block this falls into
+  let resolvedBlockId: string | null = block_id ?? getBlockIdForTime(loggedAt)
+
+  // If still in a rest period, assign to the nearest adjacent block
+  if (!resolvedBlockId) {
+    // Fallback: find the nearest non-rest block (look back up to 2h)
+    const fallback = new Date(loggedAt.getTime() - 2 * 60 * 60 * 1000)
+    resolvedBlockId = getBlockIdForTime(fallback)
+  }
+
+  if (!resolvedBlockId) {
+    return Response.json({
+      error: 'Could not determine block for this timestamp. Provide block_id explicitly.',
+    }, { status: 422 })
+  }
+
+  const block = getBlockById(resolvedBlockId)
+  if (!block) {
+    return Response.json({ error: `Block '${resolvedBlockId}' not found` }, { status: 404 })
+  }
+
+  const weekStart = formatWeekStart(getWeekStart(loggedAt))
+
+  const { data, error } = await supabase
+    .from('activity_logs')
+    .insert({
+      block_id: resolvedBlockId,
+      logged_at: loggedAt.toISOString(),
+      activity,
+      duration_minutes: duration_minutes ?? null,
+      source: 'agent',
+      notes: notes ?? null,
+      week_start: weekStart,
+    })
+    .select()
+    .single()
+
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  return Response.json({
+    log: data,
+    resolved_block: {
+      id: block.id,
+      label: block.label,
+      emoji: block.emoji,
+    },
+    message: `Logged under ${block.label}: "${activity}"${duration_minutes ? ` (${duration_minutes} min)` : ''}`,
+  }, { status: 201 })
+}
+</file>
+
+<file path="app/api/report/route.ts">
+import { NextRequest } from 'next/server'
+import { supabase } from '@/lib/supabase'
+import { validateApiKey, unauthorizedResponse } from '@/lib/auth-middleware'
+
+// GET /api/report?week_start=2026-06-01
+export async function GET(request: NextRequest) {
+  if (!validateApiKey(request)) return unauthorizedResponse()
+
+  const { searchParams } = new URL(request.url)
+  const weekStart = searchParams.get('week_start')
+
+  let query = supabase
+    .from('activity_logs')
+    .select('block_id, duration_minutes, logged_at, activity')
+    .order('logged_at', { ascending: true })
+
+  if (weekStart) query = query.eq('week_start', weekStart)
+
+  const { data, error } = await query
+  if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  const logs = data ?? []
+
+  // Aggregate per block
+  const blockMap: Record<string, {
+    total_logs: number
+    total_minutes: number
+    avg_minutes: number | null
+    activities: string[]
+  }> = {}
+
+  for (const log of logs) {
+    if (!blockMap[log.block_id]) {
+      blockMap[log.block_id] = { total_logs: 0, total_minutes: 0, avg_minutes: null, activities: [] }
+    }
+    blockMap[log.block_id].total_logs++
+    if (log.duration_minutes) blockMap[log.block_id].total_minutes += log.duration_minutes
+    blockMap[log.block_id].activities.push(log.activity)
+  }
+
+  // Compute averages
+  for (const blockId of Object.keys(blockMap)) {
+    const b = blockMap[blockId]
+    if (b.total_logs > 0 && b.total_minutes > 0) {
+      b.avg_minutes = Math.round(b.total_minutes / b.total_logs)
+    }
+  }
+
+  // Find busiest and most free blocks
+  const sorted = Object.entries(blockMap).sort((a, b) => b[1].total_minutes - a[1].total_minutes)
+  const busiest = sorted.slice(0, 3).map(([id]) => id)
+  const mostFree = sorted.slice(-3).map(([id]) => id)
+
+  return Response.json({
+    week_start: weekStart,
+    total_logs: logs.length,
+    total_minutes: logs.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0),
+    by_block: blockMap,
+    busiest_blocks: busiest,
+    most_free_blocks: mostFree,
+  })
+}
+</file>
+
+<file path="app/log/loading.tsx">
+export default function Loading() {
+  return (
+    <div>
+      <div className="page-header">
+        <div style={{ height: 13, width: 120, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 10 }} />
+        <div style={{ height: 40, width: 380, background: 'var(--cream-dark)', borderRadius: 6, marginBottom: 12 }} />
+        <div style={{ height: 16, width: 460, background: 'var(--cream-dark)', borderRadius: 4 }} />
+      </div>
+
+      {/* Quick log form skeleton */}
+      <div className="card" style={{ marginBottom: 24, padding: 24 }}>
+        <div style={{ height: 18, width: 200, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 16 }} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1, height: 38, background: 'var(--cream-dark)', borderRadius: 8 }} />
+          <div style={{ width: 100, height: 38, background: 'var(--cream-dark)', borderRadius: 8 }} />
+          <div style={{ width: 90, height: 38, background: 'var(--cream-border)', borderRadius: 8 }} />
+        </div>
+      </div>
+
+      {/* Activity items skeleton */}
+      <div className="card">
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {[1,2,3,4,5].map(i => (
+            <div key={i} style={{
+              display: 'flex', gap: 14, padding: '16px 0',
+              borderBottom: i < 5 ? '1px solid var(--cream-border)' : 'none',
+              animation: 'shimmer 1.4s ease infinite',
+              animationDelay: `${i * 0.1}s`,
+            }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--cream-dark)', flexShrink: 0 }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ height: 12, width: 180, background: 'var(--cream-dark)', borderRadius: 4 }} />
+                <div style={{ height: 14, width: `${60 + i * 8}%`, background: 'var(--cream-border)', borderRadius: 4 }} />
+                <div style={{ height: 11, width: 140, background: 'var(--cream-dark)', borderRadius: 4 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes shimmer {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 0.9; }
+        }
+      `}</style>
+    </div>
+  )
+}
+</file>
+
+<file path="app/report/loading.tsx">
+export default function Loading() {
+  return (
+    <div>
+      <div className="page-header">
+        <div style={{ height: 13, width: 180, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 10 }} />
+        <div style={{ height: 40, width: 340, background: 'var(--cream-dark)', borderRadius: 6, marginBottom: 12 }} />
+        <div style={{ height: 16, width: 500, background: 'var(--cream-dark)', borderRadius: 4 }} />
+      </div>
+
+      {/* Stat cards skeleton */}
+      <div className="report-grid" style={{ marginBottom: 24 }}>
+        {[1,2].map(i => (
+          <div key={i} className="stat-card" style={{ animation: 'shimmer 1.4s ease infinite', animationDelay: `${i * 0.1}s` }}>
+            <div style={{ height: 11, width: 140, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 10 }} />
+            <div style={{ height: 40, width: 80, background: 'var(--cream-border)', borderRadius: 6, marginBottom: 6 }} />
+            <div style={{ height: 12, width: 180, background: 'var(--cream-dark)', borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+
+      {/* Chart skeleton */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--cream-border)' }}>
+          <div style={{ height: 20, width: 180, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 6 }} />
+          <div style={{ height: 13, width: 260, background: 'var(--cream-dark)', borderRadius: 4 }} />
+        </div>
+        <div style={{ padding: '20px 24px' }}>
+          <div style={{ height: 280, background: 'var(--cream-dark)', borderRadius: 8, animation: 'shimmer 1.4s ease infinite' }} />
+        </div>
+      </div>
+
+      {/* Capacity skeleton */}
+      <div className="card">
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--cream-border)' }}>
+          <div style={{ height: 20, width: 160, background: 'var(--cream-dark)', borderRadius: 4 }} />
+        </div>
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[1,2,3,4,5,6,7].map(i => (
+            <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', animation: 'shimmer 1.4s ease infinite', animationDelay: `${i * 0.07}s` }}>
+              <div style={{ width: 24, height: 20, background: 'var(--cream-dark)', borderRadius: 4 }} />
+              <div style={{ width: 180, height: 12, background: 'var(--cream-dark)', borderRadius: 4 }} />
+              <div style={{ flex: 1, height: 6, background: 'var(--cream-dark)', borderRadius: 3 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes shimmer {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 0.9; }
+        }
+      `}</style>
+    </div>
+  )
+}
+</file>
+
+<file path="app/loading.tsx">
+export default function Loading() {
+  return (
+    <div>
+      <div className="page-header">
+        <div style={{ height: 13, width: 160, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 10 }} />
+        <div style={{ height: 40, width: 280, background: 'var(--cream-dark)', borderRadius: 6, marginBottom: 12 }} />
+        <div style={{ height: 16, width: 440, background: 'var(--cream-dark)', borderRadius: 4 }} />
+      </div>
+
+      {/* Status banner skeleton */}
+      <div className="status-banner" style={{ marginBottom: 28, background: 'var(--cream-dark)', border: 'none' }}>
+        <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--cream-border)' }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ height: 11, width: 120, background: 'var(--cream-border)', borderRadius: 4 }} />
+          <div style={{ height: 22, width: 260, background: 'var(--cream-border)', borderRadius: 4 }} />
+          <div style={{ height: 13, width: 340, background: 'var(--cream-border)', borderRadius: 4 }} />
+        </div>
+      </div>
+
+      {/* Grid skeleton */}
+      <div className="week-grid">
+        <div />
+        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+          <div key={d} className="week-grid-day-label" style={{ color: 'var(--cream-border)' }}>{d}</div>
+        ))}
+        {[0,1].map(row => (
+          <>
+            <div key={`label-${row}`} />
+            {[0,1,2,3,4,5,6].map(col => (
+              <div key={`${row}-${col}`} style={{
+                background: 'var(--cream-dark)',
+                borderRadius: 12,
+                minHeight: 120,
+                animation: 'shimmer 1.4s ease infinite',
+                opacity: 0.6 + col * 0.04,
+              }} />
+            ))}
+          </>
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes shimmer {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 0.9; }
+        }
+      `}</style>
+    </div>
+  )
+}
+</file>
+
+<file path="components/LionelCard.tsx">
+'use client'
+import Link from 'next/link'
+import { Block } from '@/lib/blocks'
+import { BookOpen } from 'lucide-react'
+
+interface Responsibility {
+  block_id: string
+  title: string
+  fixed_start_time?: string
+  fixed_end_time?: string
+}
+
+interface Props {
+  block: Block
+  isCurrent: boolean
+  responsibilities: Responsibility[]
+  logCount: number
+  animDelay?: number
+}
+
+function formatTime(t?: string) {
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  const suffix = h >= 12 ? 'pm' : 'am'
+  const hour = h > 12 ? h - 12 : h === 0 ? 12 : h
+  return `${hour}${m > 0 ? `:${String(m).padStart(2,'0')}` : ''}${suffix}`
+}
+
+export default function LionelCard({ block, isCurrent, responsibilities, logCount, animDelay = 0 }: Props) {
+  const classes = [
+    'lionel-card',
+    isCurrent ? 'is-current' : '',
+  ].filter(Boolean).join(' ')
+
+  return (
+    <Link
+      href={`/log?block=${block.id}`}
+      className={classes}
+      style={{
+        '--block-color': block.color,
+        animationDelay: `${animDelay}s`,
+      } as React.CSSProperties}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 4 }}>
+        <span className="card-emoji">{block.emoji}</span>
+        {isCurrent && <span className="card-current-badge">Now</span>}
+      </div>
+
+      <div className="card-label">
+        {block.label.replace(' Lionel', '')}
+      </div>
+
+      {responsibilities.length > 0 && (
+        <div className="card-responsibilities">
+          {responsibilities.slice(0, 2).map((r, i) => (
+            <span key={i} className="card-resp-tag">
+              {r.fixed_start_time ? `${formatTime(r.fixed_start_time)} ` : ''}{r.title}
+            </span>
+          ))}
+          {responsibilities.length > 2 && (
+            <span className="card-resp-tag">+{responsibilities.length - 2} more</span>
+          )}
+        </div>
+      )}
+
+      <div className="card-stats">
+        {logCount > 0 ? (
+          <span className="card-log-count">
+            <BookOpen size={10} />
+            {logCount} {logCount === 1 ? 'log' : 'logs'}
+          </span>
+        ) : (
+          <span className="card-log-count" style={{ opacity: 0.5 }}>No logs yet</span>
+        )}
+      </div>
+    </Link>
+  )
+}
+</file>
+
+<file path="components/LogClient.tsx">
+'use client'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { Block, getBlockById } from '@/lib/blocks'
+import { format, parseISO } from 'date-fns'
+import { Send, Clock, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
+
+interface Log {
+  id: string
+  block_id: string
+  logged_at: string
+  activity: string
+  duration_minutes?: number
+  source: 'agent' | 'gui'
+  notes?: string
+  week_start: string
+}
+
+interface Props {
+  initialLogs: Log[]
+  blocks: Block[]
+  currentBlockId: string | null
+  selectedBlockId: string
+  weekStart: string
+  thisWeek: string
+}
+
+function getWeekRange(weekStart: string) {
+  const d = new Date(weekStart + 'T00:00:00')
+  const end = new Date(d)
+  end.setDate(d.getDate() + 6)
+  return `${format(d, 'MMM d')} – ${format(end, 'MMM d, yyyy')}`
+}
+
+function addWeeks(weekStart: string, n: number): string {
+  const d = new Date(weekStart + 'T00:00:00')
+  d.setDate(d.getDate() + n * 7)
+  return d.toISOString().slice(0, 10)
+}
+
+export default function LogClient({
+  initialLogs, blocks, currentBlockId, selectedBlockId, weekStart, thisWeek
+}: Props) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [logs, setLogs] = useState<Log[]>(initialLogs)
+
+  // Quick-log form state
+  const [activity, setActivity] = useState('')
+  const [duration, setDuration] = useState('')
+  const [logBlockId, setLogBlockId] = useState(currentBlockId ?? 'mon_morning')
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [successMsg, setSuccessMsg] = useState('')
+
+  function navigate(params: Record<string, string>) {
+    const sp = new URLSearchParams(params)
+    startTransition(() => router.push(`/log?${sp.toString()}`))
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!activity.trim()) return
+    setSubmitting(true)
+
+    try {
+      const res = await fetch('/api/gui/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          activity: activity.trim(),
+          duration_minutes: duration ? parseInt(duration) : undefined,
+          block_id: logBlockId,
+          notes: notes.trim() || undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok && data.log) {
+        setLogs(prev => [data.log, ...prev])
+        setSuccessMsg(`Logged under ${data.resolved_block?.label ?? 'your block'} ✓`)
+        setActivity('')
+        setDuration('')
+        setNotes('')
+        setTimeout(() => setSuccessMsg(''), 4000)
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const block = logBlockId ? getBlockById(logBlockId) : null
+
+  return (
+    <>
+      {/* Quick Log Form */}
+      <form className="quick-log-form" onSubmit={handleSubmit}>
+        <div className="quick-log-title">
+          {block ? `${block.emoji} Quick Log — ${block.label}` : '⚡ Quick Log'}
+        </div>
+        <div className="form-row" style={{ marginBottom: 12 }}>
+          <div className="form-field grow">
+            <label className="form-label">What did you do?</label>
+            <input
+              className="form-input"
+              value={activity}
+              onChange={e => setActivity(e.target.value)}
+              placeholder="e.g. Cleaned the car, prepared lesson plan, called mom…"
+              required
+            />
+          </div>
+          <div className="form-field sm">
+            <label className="form-label">Minutes</label>
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              placeholder="10"
+            />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-field md">
+            <label className="form-label">Which Lionel?</label>
+            <select
+              className="form-select"
+              value={logBlockId}
+              onChange={e => setLogBlockId(e.target.value)}
+            >
+              {blocks.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.emoji} {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-field grow">
+            <label className="form-label">Notes (optional)</label>
+            <input
+              className="form-input"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Any context…"
+            />
+          </div>
+          <div className="form-field" style={{ justifyContent: 'flex-end' }}>
+            <label className="form-label">&nbsp;</label>
+            <button className="btn btn-primary" type="submit" disabled={submitting || !activity.trim()}>
+              <Send size={14} />
+              {submitting ? 'Logging…' : 'Log it'}
+            </button>
+          </div>
+        </div>
+        {successMsg && (
+          <div style={{ marginTop: 10, fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>
+            ✓ {successMsg}
+          </div>
+        )}
+      </form>
+
+      {/* Filter Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <div className="filter-bar" style={{ marginBottom: 0 }}>
+          <button
+            className={`filter-chip${selectedBlockId === 'all' ? ' active' : ''}`}
+            onClick={() => navigate({ block: 'all', week: weekStart })}
+          >
+            All Lionels
+          </button>
+          {blocks.map(b => (
+            <button
+              key={b.id}
+              className={`filter-chip${selectedBlockId === b.id ? ' active' : ''}`}
+              onClick={() => navigate({ block: b.id, week: weekStart })}
+            >
+              {b.emoji} {b.label.replace(' Lionel', '')}
+            </button>
+          ))}
+        </div>
+
+        {/* Week selector */}
+        <div className="week-selector">
+          <button
+            className="week-selector-btn"
+            onClick={() => navigate({ block: selectedBlockId, week: addWeeks(weekStart, -1) })}
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <span className="week-selector-label">{getWeekRange(weekStart)}</span>
+          <button
+            className="week-selector-btn"
+            onClick={() => navigate({ block: selectedBlockId, week: addWeeks(weekStart, 1) })}
+            disabled={weekStart >= thisWeek}
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* Activity Feed */}
+      <div className="card">
+        <div className="card-body">
+          {logs.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">📭</div>
+              <div className="empty-state-title">No logs yet</div>
+              <div className="empty-state-text">
+                Use the Quick Log above or message your AI agent to start tracking what the Lionels are up to.
+              </div>
+            </div>
+          ) : (
+            <div className="activity-feed">
+              {logs.map((log, i) => {
+                const blk = getBlockById(log.block_id)
+                const time = new Date(log.logged_at).toLocaleTimeString('en-US', {
+                  timeZone: 'America/New_York',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true,
+                })
+                const date = new Date(log.logged_at).toLocaleDateString('en-US', {
+                  timeZone: 'America/New_York',
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                })
+                return (
+                  <div key={log.id} className="activity-item fade-in" style={{ animationDelay: `${i * 0.03}s`, opacity: 0 }}>
+                    <div className="activity-avatar" style={{ borderColor: blk?.color + '50' }}>
+                      {blk?.emoji ?? '🕐'}
+                    </div>
+                    <div className="activity-body">
+                      <div className="activity-header">
+                        <span className="activity-who" style={{ color: blk?.color }}>
+                          {blk?.label ?? log.block_id}
+                        </span>
+                        <span className="source-badge" style={{ background: log.source === 'agent' ? 'var(--purple-light)' : 'var(--green-light)', color: log.source === 'agent' ? 'var(--purple)' : 'var(--green)' }}>
+                          {log.source}
+                        </span>
+                      </div>
+                      <div className="activity-text">{log.activity}</div>
+                      {log.notes && (
+                        <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                          "{log.notes}"
+                        </div>
+                      )}
+                      <div className="activity-meta">
+                        <span className="meta-tag"><Clock size={10} /> {date} at {time}</span>
+                        {log.duration_minutes && (
+                          <span className="duration-tag">⏱ {log.duration_minutes} min</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+</file>
+
+<file path="components/NavBar.tsx">
+'use client'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { LayoutGrid, BookOpen, BarChart2, Clock } from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+const NAV_LINKS = [
+  { href: '/',        label: 'Week',    icon: LayoutGrid },
+  { href: '/log',     label: 'Log',     icon: BookOpen },
+  { href: '/report',  label: 'Report',  icon: BarChart2 },
+]
+
+export default function NavBar() {
+  const pathname = usePathname()
+  const [currentLabel, setCurrentLabel] = useState<string>('')
+
+  useEffect(() => {
+    // Fetch the current block label for the nav indicator
+    async function fetchCurrent() {
+      try {
+        const res = await fetch('/api/gui/current')
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.is_rest_period) {
+          setCurrentLabel(data.rest_label ?? 'Resting')
+        } else if (data.block) {
+          setCurrentLabel(data.block.label)
+        }
+      } catch { /* silently fail in nav */ }
+    }
+    fetchCurrent()
+  }, [])
+
+  return (
+    <nav className="nav">
+      <div className="nav-inner">
+        <Link href="/" className="nav-brand">
+          <div className="nav-brand-icon">⏳</div>
+          <span className="nav-brand-text">Intertemporal</span>
+        </Link>
+
+        <div className="nav-links">
+          {NAV_LINKS.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`nav-link${pathname === href ? ' active' : ''}`}
+            >
+              <Icon size={15} />
+              {label}
+            </Link>
+          ))}
+        </div>
+
+        {currentLabel && (
+          <div className="nav-current-block">
+            <div className="pulse" />
+            <Clock size={11} />
+            <span>{currentLabel}</span>
+          </div>
+        )}
+      </div>
+    </nav>
+  )
+}
+</file>
+
+<file path="components/ReportClient.tsx">
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Block, getBlockById } from '@/lib/blocks'
+import { format } from 'date-fns'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+import { ChevronLeft, ChevronRight, Clock, BookOpen, Zap } from 'lucide-react'
+
+interface BlockStats {
+  total_logs: number
+  total_minutes: number
+  activities: string[]
+}
+
+interface Props {
+  blocks: Block[]
+  byBlock: Record<string, BlockStats>
+  totalLogs: number
+  totalMinutes: number
+  weekStart: string
+  thisWeek: string
+}
+
+function getWeekRange(weekStart: string) {
+  const d = new Date(weekStart + 'T00:00:00')
+  const end = new Date(d)
+  end.setDate(d.getDate() + 6)
+  return `${format(d, 'MMM d')} – ${format(end, 'MMM d, yyyy')}`
+}
+
+function addWeeks(weekStart: string, n: number): string {
+  const d = new Date(weekStart + 'T00:00:00')
+  d.setDate(d.getDate() + n * 7)
+  return d.toISOString().slice(0, 10)
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const block = payload[0]?.payload?.block as Block | undefined
+    return (
+      <div style={{
+        background: 'white',
+        border: '1px solid var(--cream-border)',
+        borderRadius: 10,
+        padding: '10px 14px',
+        boxShadow: 'var(--shadow-lg)',
+        fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4, color: block?.color }}>
+          {block?.emoji} {block?.label}
+        </div>
+        <div style={{ color: 'var(--ink-muted)' }}>
+          {payload[0].value} minutes logged
+        </div>
+        <div style={{ color: 'var(--ink-faint)', fontSize: 11 }}>
+          {payload[0]?.payload?.logs} activities
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
+export default function ReportClient({ blocks, byBlock, totalLogs, totalMinutes, weekStart, thisWeek }: Props) {
+  const router = useRouter()
+
+  function navigate(week: string) {
+    router.push(`/report?week=${week}`)
+  }
+
+  // Build chart data
+  const chartData = blocks.map(b => ({
+    id: b.id,
+    name: b.label.replace(' Lionel', '').replace(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)day? /, ''),
+    shortName: b.id.replace('_', ' ').split(' ').map(w => w[0].toUpperCase() + w.slice(1,3)).join(' '),
+    minutes: byBlock[b.id]?.total_minutes ?? 0,
+    logs: byBlock[b.id]?.total_logs ?? 0,
+    block: b,
+  }))
+
+  const maxMinutes = Math.max(...chartData.map(d => d.minutes), 1)
+
+  // Sort for top/bottom
+  const sorted = [...chartData].sort((a, b) => b.minutes - a.minutes)
+  const topThree = sorted.slice(0, 3).filter(d => d.minutes > 0)
+  const bottomThree = sorted.slice(-3).filter(d => d.minutes === 0 || true).filter(d => d.minutes < sorted[0].minutes)
+
+  const hasData = totalLogs > 0
+
+  return (
+    <>
+      {/* Week Selector */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div className="week-selector">
+          <button className="week-selector-btn" onClick={() => navigate(addWeeks(weekStart, -1))}>
+            <ChevronLeft size={15} />
+          </button>
+          <span className="week-selector-label">{getWeekRange(weekStart)}</span>
+          <button
+            className="week-selector-btn"
+            onClick={() => navigate(addWeeks(weekStart, 1))}
+            disabled={weekStart >= thisWeek}
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ink-faint)' }}>
+          {hasData ? `${totalLogs} activities · ${totalMinutes} minutes tracked` : 'No data for this week yet'}
+        </div>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="report-grid">
+        <div className="stat-card fade-in fade-in-delay-1">
+          <div className="stat-label"><BookOpen size={12} style={{ display: 'inline', marginRight: 4 }} />Activities Logged</div>
+          <div className="stat-value">{totalLogs}</div>
+          <div className="stat-sublabel">across all Lionels this week</div>
+        </div>
+        <div className="stat-card fade-in fade-in-delay-2">
+          <div className="stat-label"><Clock size={12} style={{ display: 'inline', marginRight: 4 }} />Total Time Tracked</div>
+          <div className="stat-value">{totalMinutes >= 60 ? `${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m` : `${totalMinutes}m`}</div>
+          <div className="stat-sublabel">of logged activity time</div>
+        </div>
+      </div>
+
+      {!hasData ? (
+        <div className="card">
+          <div className="card-body">
+            <div className="empty-state">
+              <div className="empty-state-icon">📊</div>
+              <div className="empty-state-title">No data yet for this week</div>
+              <div className="empty-state-text">
+                Start logging activities via the Log tab or your AI agent, and this page will fill up with insights.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Bar Chart */}
+          <div className="card fade-in fade-in-delay-3" style={{ marginBottom: 20 }}>
+            <div className="card-header">
+              <div className="flex-between">
+                <div>
+                  <div className="section-title">Minutes by Lionel</div>
+                  <div className="section-subtitle" style={{ marginBottom: 0 }}>Total tracked time per block this week</div>
+                </div>
+              </div>
+            </div>
+            <div className="card-body">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 40 }}>
+                  <XAxis
+                    dataKey="shortName"
+                    tick={{ fontSize: 10, fill: 'var(--ink-faint)' }}
+                    angle={-45}
+                    textAnchor="end"
+                    interval={0}
+                  />
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--ink-faint)' }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="minutes" radius={[4,4,0,0]}>
+                    {chartData.map(entry => (
+                      <Cell
+                        key={entry.id}
+                        fill={entry.minutes > 0 ? entry.block.color : 'var(--cream-border)'}
+                        opacity={entry.minutes > 0 ? 0.85 : 0.3}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Capacity Grid */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-header">
+              <div className="section-title">Capacity Heatmap</div>
+              <div className="section-subtitle" style={{ marginBottom: 0 }}>
+                Which Lionels are swamped vs. free?
+              </div>
+            </div>
+            <div className="card-body">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {blocks.map(b => {
+                  const stats = byBlock[b.id]
+                  const mins = stats?.total_minutes ?? 0
+                  const pct = Math.min((mins / maxMinutes) * 100, 100)
+                  const level = pct > 70 ? 'high' : pct > 30 ? 'medium' : 'low'
+                  return (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>{b.emoji}</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)', minWidth: 180, flexShrink: 0 }}>
+                        {b.label}
+                      </span>
+                      <div className="capacity-bar" style={{ flex: 1 }}>
+                        <div className="capacity-bar-track">
+                          <div
+                            className={`capacity-bar-fill ${level}`}
+                            style={{ width: `${Math.max(pct, mins > 0 ? 3 : 0)}%`, backgroundColor: b.color }}
+                          />
+                        </div>
+                        <span className="capacity-bar-label">
+                          {mins > 0 ? `${mins}m` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Busiest Lionels */}
+          {topThree.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="card">
+                <div className="card-header">
+                  <div className="section-title">🔥 Most Productive</div>
+                </div>
+                <div className="card-body" style={{ paddingTop: 12 }}>
+                  {topThree.map((d, i) => (
+                    <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < topThree.length - 1 ? '1px solid var(--cream-border)' : 'none' }}>
+                      <span style={{ fontSize: 18 }}>{d.block.emoji}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: d.block.color }}>{d.block.label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{d.logs} activities · {d.minutes} min</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header">
+                  <div className="section-title">💤 Most Capacity</div>
+                </div>
+                <div className="card-body" style={{ paddingTop: 12 }}>
+                  {bottomThree.slice(0, 3).map((d, i) => (
+                    <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < 2 ? '1px solid var(--cream-border)' : 'none' }}>
+                      <span style={{ fontSize: 18 }}>{d.block.emoji}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: d.block.color }}>{d.block.label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{d.logs > 0 ? `${d.logs} activities · ${d.minutes} min` : 'Nothing logged yet'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  )
+}
+</file>
+
+<file path="components/StatusBanner.tsx">
+'use client'
+import { Block } from '@/lib/blocks'
+import { Moon } from 'lucide-react'
+
+interface Props {
+  currentBlock: Block | null
+  now: string
+}
+
+export default function StatusBanner({ currentBlock, now }: Props) {
+  const estTime = new Date(now).toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+  const estDate = new Date(now).toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  if (!currentBlock) {
+    return (
+      <div className="status-banner is-rest fade-in">
+        <div className="status-banner-icon">
+          <Moon size={36} color="var(--ink-faint)" />
+        </div>
+        <div className="status-banner-body">
+          <div className="status-banner-label">Rest Period</div>
+          <div className="status-banner-title">Lionel is resting 💤</div>
+          <div className="status-banner-subtitle">{estDate} · {estTime} EST — No scheduling during rest windows</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="status-banner is-active fade-in" style={{ borderColor: currentBlock.color + '60' }}>
+      <div className="status-banner-icon">{currentBlock.emoji}</div>
+      <div className="status-banner-body">
+        <div className="status-banner-label">Active Right Now</div>
+        <div className="status-banner-title" style={{ color: currentBlock.color }}>
+          {currentBlock.label}
+        </div>
+        <div className="status-banner-subtitle">
+          {estDate} · {estTime} EST · Block runs {currentBlock.period === 'morning' ? '6:00am – 2:00pm' : '4:00pm – 12:00am'}
+        </div>
+      </div>
+    </div>
+  )
+}
+</file>
+
+<file path="components/WeekGrid.tsx">
+'use client'
+import { Block } from '@/lib/blocks'
+import LionelCard from './LionelCard'
+
+interface Responsibility {
+  block_id: string
+  title: string
+  fixed_start_time?: string
+  fixed_end_time?: string
+}
+
+interface Props {
+  blocks: Block[]
+  currentBlockId: string | null
+  responsibilities: Responsibility[]
+  logCounts: Record<string, number>
+  weekLabel: string
+}
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const PERIODS: ('morning' | 'evening')[] = ['morning', 'evening']
+const PERIOD_LABELS = { morning: '☀️ AM', evening: '🌙 PM' }
+
+export default function WeekGrid({ blocks, currentBlockId, responsibilities, logCounts }: Props) {
+  const getBlock = (day: number, period: 'morning' | 'evening') =>
+    blocks.find(b => b.day_of_week === day && b.period === period)
+
+  const getResponsibilities = (blockId: string) =>
+    responsibilities.filter(r => r.block_id === blockId)
+
+  return (
+    <div>
+      <div className="week-grid fade-in">
+        {/* Header row */}
+        <div className="week-grid-period-label" />
+        {DAYS.map(day => (
+          <div key={day} className="week-grid-day-label">{day}</div>
+        ))}
+
+        {/* Morning row */}
+        <div className="week-grid-period-label">{PERIOD_LABELS.morning}</div>
+        {[0,1,2,3,4,5,6].map(day => {
+          const block = getBlock(day, 'morning')!
+          return (
+            <LionelCard
+              key={`${day}_morning`}
+              block={block}
+              isCurrent={block.id === currentBlockId}
+              responsibilities={getResponsibilities(block.id)}
+              logCount={logCounts[block.id] ?? 0}
+              animDelay={day * 0.04}
+            />
+          )
+        })}
+
+        {/* Nap row */}
+        <div className="week-grid-period-label">😴 Nap</div>
+        {[0,1,2,3,4,5,6].map(day => (
+          <div key={`nap_${day}`} className="lionel-card is-rest" style={{ minHeight: 44 }}>
+            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>2pm – 4pm</span>
+          </div>
+        ))}
+
+        {/* Evening row */}
+        <div className="week-grid-period-label">{PERIOD_LABELS.evening}</div>
+        {[0,1,2,3,4,5,6].map(day => {
+          const block = getBlock(day, 'evening')!
+          return (
+            <LionelCard
+              key={`${day}_evening`}
+              block={block}
+              isCurrent={block.id === currentBlockId}
+              responsibilities={getResponsibilities(block.id)}
+              logCount={logCounts[block.id] ?? 0}
+              animDelay={0.28 + day * 0.04}
+            />
+          )
+        })}
+
+        {/* Sleep row */}
+        <div className="week-grid-period-label">🌑 Sleep</div>
+        {[0,1,2,3,4,5,6].map(day => (
+          <div key={`sleep_${day}`} className="lionel-card is-rest" style={{ minHeight: 44 }}>
+            <span style={{ fontSize: 11, color: '#A8A29E', fontStyle: 'italic' }}>12am – 6am</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+</file>
+
+<file path="lib/auth-middleware.ts">
+import { NextRequest } from 'next/server'
+
+export function validateApiKey(request: NextRequest): boolean {
+  const authHeader = request.headers.get('authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false
+  const token = authHeader.substring(7)
+  return token === process.env.AGENT_API_KEY
+}
+
+export function unauthorizedResponse() {
+  return Response.json(
+    { error: 'Unauthorized. Provide a valid Bearer token.' },
+    { status: 401 }
+  )
+}
+</file>
+
+<file path="lib/blocks.ts">
+import { toZonedTime, fromZonedTime } from 'date-fns-tz'
+import { startOfWeek } from 'date-fns'
+
+export const TIMEZONE = 'America/New_York'
+
+export type Period = 'morning' | 'evening'
+
+export interface Block {
+  id: string
+  label: string
+  day_of_week: number // 0=Sun, 1=Mon ... 6=Sat
+  period: Period
+  start_time: string
+  end_time: string
+  color: string
+  emoji: string
+}
+
+// The canonical 14 blocks — mirrors the DB seed data
+export const BLOCKS: Block[] = [
+  { id: 'sun_morning', label: 'Sunday Morning Lionel',    day_of_week: 0, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#7C6CAF', emoji: '⛪' },
+  { id: 'sun_evening', label: 'Sunday Evening Lionel',    day_of_week: 0, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#9B59B6', emoji: '🌆' },
+  { id: 'mon_morning', label: 'Monday Morning Lionel',    day_of_week: 1, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#1A5C6B', emoji: '🌅' },
+  { id: 'mon_evening', label: 'Monday Evening Lionel',    day_of_week: 1, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#1A7A8A', emoji: '🌙' },
+  { id: 'tue_morning', label: 'Tuesday Morning Lionel',   day_of_week: 2, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#2E6B3E', emoji: '🌅' },
+  { id: 'tue_evening', label: 'Tuesday Evening Lionel',   day_of_week: 2, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#D4A853', emoji: '📡' },
+  { id: 'wed_morning', label: 'Wednesday Morning Lionel', day_of_week: 3, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#1A5C6B', emoji: '🌅' },
+  { id: 'wed_evening', label: 'Wednesday Evening Lionel', day_of_week: 3, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#1A7A8A', emoji: '🌙' },
+  { id: 'thu_morning', label: 'Thursday Morning Lionel',  day_of_week: 4, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#2E6B3E', emoji: '🌅' },
+  { id: 'thu_evening', label: 'Thursday Evening Lionel',  day_of_week: 4, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#8B6914', emoji: '🎹' },
+  { id: 'fri_morning', label: 'Friday Morning Lionel',    day_of_week: 5, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#1A5C6B', emoji: '🌅' },
+  { id: 'fri_evening', label: 'Friday Evening Lionel',    day_of_week: 5, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#C0392B', emoji: '🎉' },
+  { id: 'sat_morning', label: 'Saturday Morning Lionel',  day_of_week: 6, period: 'morning', start_time: '06:00', end_time: '14:00', color: '#2E6B3E', emoji: '🌅' },
+  { id: 'sat_evening', label: 'Saturday Evening Lionel',  day_of_week: 6, period: 'evening', start_time: '16:00', end_time: '00:00', color: '#9B59B6', emoji: '🌆' },
+]
+
+const DAY_PREFIX = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+
+/**
+ * Determines if a given UTC timestamp falls in a rest period (nap or night sleep) in EST.
+ * Rest windows: 02:00–06:00 (night), 14:00–16:00 (nap)
+ */
+export function isRestPeriod(utcDate: Date = new Date()): boolean {
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const hours = est.getHours()
+  const minutes = est.getMinutes()
+  const totalMinutes = hours * 60 + minutes
+
+  // Night sleep: 00:00 to 06:00 (0 to 360 min)
+  if (totalMinutes < 6 * 60) return true
+  // Nap: 14:00 to 16:00 (840 to 960 min)
+  if (totalMinutes >= 14 * 60 && totalMinutes < 16 * 60) return true
+  return false
+}
+
+/**
+ * Get the block ID for a given UTC timestamp in EST.
+ * Returns null if currently in a rest period.
+ */
+export function getBlockIdForTime(utcDate: Date = new Date()): string | null {
+  if (isRestPeriod(utcDate)) return null
+
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const dayOfWeek = est.getDay() // 0=Sun
+  const hours = est.getHours()
+  const totalMinutes = hours * 60 + est.getMinutes()
+
+  const dayPrefix = DAY_PREFIX[dayOfWeek]
+  let period: Period
+
+  if (totalMinutes >= 6 * 60 && totalMinutes < 14 * 60) {
+    period = 'morning'
+  } else {
+    period = 'evening'
+  }
+
+  return `${dayPrefix}_${period}`
+}
+
+/**
+ * Get the full Block object for a given UTC timestamp.
+ */
+export function getBlockForTime(utcDate: Date = new Date()): Block | null {
+  const blockId = getBlockIdForTime(utcDate)
+  if (!blockId) return null
+  return BLOCKS.find(b => b.id === blockId) ?? null
+}
+
+/**
+ * Get the current active block (right now in EST).
+ */
+export function getCurrentBlock(): Block | null {
+  return getBlockForTime(new Date())
+}
+
+/**
+ * Get the Monday (week_start) of the week containing a given UTC date, in EST.
+ */
+export function getWeekStart(utcDate: Date = new Date()): Date {
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const monday = startOfWeek(est, { weekStartsOn: 1 })
+  // Return as a plain date (no TZ shift) — just year/month/day
+  return new Date(monday.getFullYear(), monday.getMonth(), monday.getDate())
+}
+
+/**
+ * Format a week_start date as YYYY-MM-DD string for DB storage.
+ */
+export function formatWeekStart(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/**
+ * Get a human-readable rest period label.
+ */
+export function getRestPeriodLabel(utcDate: Date = new Date()): string {
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const hours = est.getHours()
+  if (hours < 6) return 'Night Sleep (12am–6am)'
+  return 'Afternoon Nap (2pm–4pm)'
+}
+
+/**
+ * Get all 14 blocks in order (Sun–Sat, morning first).
+ */
+export function getAllBlocks(): Block[] {
+  return BLOCKS
+}
+
+/**
+ * Get block by ID.
+ */
+export function getBlockById(id: string): Block | undefined {
+  return BLOCKS.find(b => b.id === id)
+}
+</file>
+
+<file path="lib/supabase.ts">
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+// Server-side client with service role key — never expose to browser
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+})
+</file>
+
+<file path="supabase/schema.sql">
+-- ============================================================
+-- Intertemporal System — Supabase Schema
+-- Run this manually in the Supabase SQL Editor
+-- ============================================================
+
+-- 1. BLOCKS (static seed — 14 rows)
+CREATE TABLE IF NOT EXISTS blocks (
+  id TEXT PRIMARY KEY,           -- e.g. 'mon_morning'
+  label TEXT NOT NULL,           -- 'Monday Morning Lionel'
+  day_of_week INT NOT NULL,      -- 0=Sun, 1=Mon ... 6=Sat
+  period TEXT NOT NULL           -- 'morning' | 'evening'
+    CHECK (period IN ('morning', 'evening')),
+  start_time TIME NOT NULL,      -- '06:00' or '16:00'
+  end_time TIME NOT NULL,        -- '14:00' or '00:00'
+  color TEXT NOT NULL DEFAULT '#1A5C6B',  -- per-block accent color
+  emoji TEXT NOT NULL DEFAULT '🌅'
+);
+
+-- 2. RESPONSIBILITIES (fixed recurring items per block)
+CREATE TABLE IF NOT EXISTS responsibilities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  fixed_start_time TIME,         -- optional fixed time within block
+  fixed_end_time TIME,
+  is_recurring BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 3. ACTIVITY LOGS (the heart of the system)
+CREATE TABLE IF NOT EXISTS activity_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  block_id TEXT NOT NULL REFERENCES blocks(id),
+  logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- actual time activity happened
+  activity TEXT NOT NULL,                         -- "cleaned the car"
+  duration_minutes INT,                           -- 10
+  source TEXT NOT NULL DEFAULT 'gui'              -- 'agent' | 'gui'
+    CHECK (source IN ('agent', 'gui')),
+  notes TEXT,
+  week_start DATE NOT NULL,       -- Monday of that week (for grouping)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for common queries
+CREATE INDEX idx_activity_logs_block_id ON activity_logs(block_id);
+CREATE INDEX idx_activity_logs_week_start ON activity_logs(week_start);
+CREATE INDEX idx_activity_logs_logged_at ON activity_logs(logged_at DESC);
+CREATE INDEX idx_responsibilities_block_id ON responsibilities(block_id);
+
+-- ============================================================
+-- SEED: 14 Blocks
+-- ============================================================
+INSERT INTO blocks (id, label, day_of_week, period, start_time, end_time, color, emoji) VALUES
+  ('sun_morning', 'Sunday Morning Lionel',    0, 'morning', '06:00', '14:00', '#7C6CAF', '⛪'),
+  ('sun_evening', 'Sunday Evening Lionel',    0, 'evening', '16:00', '00:00', '#9B59B6', '🌆'),
+  ('mon_morning', 'Monday Morning Lionel',    1, 'morning', '06:00', '14:00', '#1A5C6B', '🌅'),
+  ('mon_evening', 'Monday Evening Lionel',    1, 'evening', '16:00', '00:00', '#1A7A8A', '🌙'),
+  ('tue_morning', 'Tuesday Morning Lionel',   2, 'morning', '06:00', '14:00', '#2E6B3E', '🌅'),
+  ('tue_evening', 'Tuesday Evening Lionel',   2, 'evening', '16:00', '00:00', '#D4A853', '📡'),
+  ('wed_morning', 'Wednesday Morning Lionel', 3, 'morning', '06:00', '14:00', '#1A5C6B', '🌅'),
+  ('wed_evening', 'Wednesday Evening Lionel', 3, 'evening', '16:00', '00:00', '#1A7A8A', '🌙'),
+  ('thu_morning', 'Thursday Morning Lionel',  4, 'morning', '06:00', '14:00', '#2E6B3E', '🌅'),
+  ('thu_evening', 'Thursday Evening Lionel',  4, 'evening', '16:00', '00:00', '#8B4513', '🎹'),
+  ('fri_morning', 'Friday Morning Lionel',    5, 'morning', '06:00', '14:00', '#1A5C6B', '🌅'),
+  ('fri_evening', 'Friday Evening Lionel',    5, 'evening', '16:00', '00:00', '#C0392B', '🎉'),
+  ('sat_morning', 'Saturday Morning Lionel',  6, 'morning', '06:00', '14:00', '#2E6B3E', '🌅'),
+  ('sat_evening', 'Saturday Evening Lionel',  6, 'evening', '16:00', '00:00', '#9B59B6', '🌆')
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- SEED: Default Responsibilities
+-- ============================================================
+INSERT INTO responsibilities (block_id, title, description, fixed_start_time, fixed_end_time, is_recurring) VALUES
+  ('tue_evening', 'Weekly Livestream', 'Tuesday evening piano livestream', '17:00', '19:00', TRUE),
+  ('thu_evening', 'Piano Lessons', 'Thursday evening piano lessons', '18:00', '21:00', TRUE),
+  ('sun_morning', 'Church', 'Sunday morning church service', '09:30', '13:30', TRUE)
+ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- Row Level Security (optional — enable if using anon access)
+-- ============================================================
+-- ALTER TABLE blocks ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE responsibilities ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+</file>
+
+<file path="app/log/page.tsx">
+import { BLOCKS, getCurrentBlock, getWeekStart, formatWeekStart } from '@/lib/blocks'
+import { supabase } from '@/lib/supabase'
+import LogClient from '@/components/LogClient'
+import { Suspense } from 'react'
+import { unstable_noStore as noStore } from 'next/cache'
+
+// ─── Static shell — renders in <50ms ────────────────────────────────────────
+export default async function LogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ block?: string; week?: string }>
+}) {
+  const params = await searchParams
+  const blockId = params.block ?? 'all'
+  const weekStart = params.week
+
+  const now = new Date()
+  const thisWeek = formatWeekStart(getWeekStart(now))
+  const currentBlock = getCurrentBlock()
+  const resolvedWeek = weekStart ?? thisWeek
+
+  return (
+    <>
+      <div className="page-header">
+        <p className="page-header-eyebrow">Activity Log</p>
+        <h1 className="page-title">What have the Lionels been up to?</h1>
+        <p className="page-subtitle">
+          Every logged activity, organized by the Lionel who did it. Log from here or via your AI agent.
+        </p>
+      </div>
+
+      <Suspense fallback={<LogSkeleton />}>
+        <LogDataLoader
+          blockId={blockId}
+          resolvedWeek={resolvedWeek}
+          thisWeek={thisWeek}
+          currentBlockId={currentBlock?.id ?? null}
+        />
+      </Suspense>
+    </>
+  )
+}
+
+// ─── Async data component — only this waits for Supabase ────────────────────
+async function LogDataLoader({
+  blockId,
+  resolvedWeek,
+  thisWeek,
+  currentBlockId,
+}: {
+  blockId: string
+  resolvedWeek: string
+  thisWeek: string
+  currentBlockId: string | null
+}) {
+  noStore()
+
+  let query = supabase
+    .from('activity_logs')
+    .select('*')
+    .eq('week_start', resolvedWeek)
+    .order('logged_at', { ascending: false })
+    .limit(100)
+
+  if (blockId !== 'all') {
+    query = query.eq('block_id', blockId)
+  }
+
+  const { data } = await query
+
+  return (
+    <LogClient
+      initialLogs={data ?? []}
+      blocks={BLOCKS}
+      currentBlockId={currentBlockId}
+      selectedBlockId={blockId}
+      weekStart={resolvedWeek}
+      thisWeek={thisWeek}
+    />
+  )
+}
+
+// ─── Inline skeleton ─────────────────────────────────────────────────────────
+function LogSkeleton() {
+  return (
+    <>
+      <div className="card" style={{ marginBottom: 24, padding: 24 }}>
+        <div style={{ height: 18, width: 200, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 16 }} />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1, height: 38, background: 'var(--cream-dark)', borderRadius: 8 }} />
+          <div style={{ width: 100, height: 38, background: 'var(--cream-dark)', borderRadius: 8 }} />
+          <div style={{ width: 90, height: 38, background: 'var(--cream-border)', borderRadius: 8 }} />
+        </div>
+      </div>
+      <div className="card">
+        <div style={{ padding: '20px 24px' }}>
+          {[1,2,3,4].map(i => (
+            <div key={i} style={{
+              display: 'flex', gap: 14, padding: '16px 0',
+              borderBottom: i < 4 ? '1px solid var(--cream-border)' : 'none',
+            }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--cream-dark)', flexShrink: 0 }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ height: 12, width: 180, background: 'var(--cream-dark)', borderRadius: 4 }} />
+                <div style={{ height: 14, width: `${55 + i * 8}%`, background: 'var(--cream-border)', borderRadius: 4 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+</file>
+
+<file path="app/report/page.tsx">
+import { BLOCKS, getWeekStart, formatWeekStart } from '@/lib/blocks'
+import { supabase } from '@/lib/supabase'
+import ReportClient from '@/components/ReportClient'
+import { Suspense } from 'react'
+import { unstable_noStore as noStore } from 'next/cache'
+
+// ─── Static shell — renders in <50ms ────────────────────────────────────────
+export default async function ReportPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>
+}) {
+  const params = await searchParams
+  const now = new Date()
+  const thisWeek = formatWeekStart(getWeekStart(now))
+  const weekStart = params.week ?? thisWeek
+
+  return (
+    <>
+      <div className="page-header">
+        <p className="page-header-eyebrow">Productivity Report</p>
+        <h1 className="page-title">Which Lionels are thriving?</h1>
+        <p className="page-subtitle">
+          Compare productivity across your 14 blocks — see who's swamped, who has capacity, and how your week is really distributed.
+        </p>
+      </div>
+
+      <Suspense fallback={<ReportSkeleton />}>
+        <ReportDataLoader weekStart={weekStart} thisWeek={thisWeek} />
+      </Suspense>
+    </>
+  )
+}
+
+// ─── Async data component — only this waits for Supabase ────────────────────
+async function ReportDataLoader({ weekStart, thisWeek }: { weekStart: string; thisWeek: string }) {
+  noStore()
+
+  const { data: logs } = await supabase
+    .from('activity_logs')
+    .select('block_id, duration_minutes, logged_at, activity')
+    .eq('week_start', weekStart)
+    .order('logged_at', { ascending: true })
+
+  const byBlock: Record<string, { total_logs: number; total_minutes: number; activities: string[] }> = {}
+  for (const log of logs ?? []) {
+    if (!byBlock[log.block_id]) {
+      byBlock[log.block_id] = { total_logs: 0, total_minutes: 0, activities: [] }
+    }
+    byBlock[log.block_id].total_logs++
+    byBlock[log.block_id].total_minutes += log.duration_minutes ?? 0
+    byBlock[log.block_id].activities.push(log.activity)
+  }
+
+  const totalLogs = (logs ?? []).length
+  const totalMinutes = (logs ?? []).reduce((s, l) => s + (l.duration_minutes ?? 0), 0)
+
+  return (
+    <ReportClient
+      blocks={BLOCKS}
+      byBlock={byBlock}
+      totalLogs={totalLogs}
+      totalMinutes={totalMinutes}
+      weekStart={weekStart}
+      thisWeek={thisWeek}
+    />
+  )
+}
+
+// ─── Inline skeleton ─────────────────────────────────────────────────────────
+function ReportSkeleton() {
+  return (
+    <>
+      <div className="report-grid" style={{ marginBottom: 24 }}>
+        {[1, 2].map(i => (
+          <div key={i} className="stat-card">
+            <div style={{ height: 11, width: 140, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 10 }} />
+            <div style={{ height: 40, width: 80, background: 'var(--cream-border)', borderRadius: 6, marginBottom: 6 }} />
+            <div style={{ height: 12, width: 180, background: 'var(--cream-dark)', borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--cream-border)' }}>
+          <div style={{ height: 20, width: 180, background: 'var(--cream-dark)', borderRadius: 4, marginBottom: 6 }} />
+        </div>
+        <div style={{ padding: '20px 24px' }}>
+          <div style={{ height: 280, background: 'var(--cream-dark)', borderRadius: 8, animation: 'shimmer 1.4s ease infinite' }} />
+        </div>
+      </div>
+      <style>{`@keyframes shimmer { 0%,100%{opacity:.5} 50%{opacity:.9} }`}</style>
+    </>
+  )
+}
+</file>
+
+<file path="app/globals.css">
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+/* ======================================================
+   INTERTEMPORAL SYSTEM — DESIGN SYSTEM
+   Sophisticated Fun: warm cream + deep teal + gold
+   ====================================================== */
+
+:root {
+  /* Core palette */
+  --cream:        #FAF7F2;
+  --cream-dark:   #F0EBE1;
+  --cream-border: #E5DDD0;
+  --teal-900:     #0D3D47;
+  --teal-700:     #1A5C6B;
+  --teal-500:     #2A7A8C;
+  --teal-300:     #5FA8BB;
+  --teal-100:     #C8E8EF;
+  --gold:         #D4A853;
+  --gold-light:   #F0CB7A;
+  --gold-dark:    #A07930;
+  --ink:          #1C1917;
+  --ink-muted:    #57534E;
+  --ink-faint:    #A8A29E;
+
+  /* Status */
+  --green:        #2E6B3E;
+  --green-light:  #D1FAE5;
+  --amber:        #D97706;
+  --amber-light:  #FEF3C7;
+  --red:          #B91C1C;
+  --red-light:    #FEE2E2;
+  --purple:       #7C3AED;
+  --purple-light: #EDE9FE;
+
+  /* Typography */
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-sans:  'Inter', system-ui, sans-serif;
+
+  /* Spacing */
+  --nav-height: 64px;
+
+  /* Shadows */
+  --shadow-card: 0 2px 12px rgba(28,25,23,0.08), 0 1px 3px rgba(28,25,23,0.06);
+  --shadow-lg:   0 8px 32px rgba(28,25,23,0.12), 0 2px 8px rgba(28,25,23,0.08);
+  --shadow-glow: 0 0 0 3px rgba(26,92,107,0.3), 0 4px 20px rgba(26,92,107,0.2);
+}
+
+/* ======================================================
+   RESET & BASE
+   ====================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-family: var(--font-sans);
+  background: var(--cream);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* ======================================================
+   LAYOUT
+   ====================================================== */
+.page-wrapper {
+  min-height: 100vh;
+  background: var(--cream);
+}
+
+.main-content {
+  padding-top: var(--nav-height);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-left: 24px;
+  padding-right: 24px;
+  padding-bottom: 48px;
+}
+
+/* ======================================================
+   NAVIGATION
+   ====================================================== */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--nav-height);
+  background: rgba(250,247,242,0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--cream-border);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.nav-inner {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.nav-brand-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--teal-700);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.nav-brand-text {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.3px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.nav-link:hover {
+  background: var(--cream-dark);
+  color: var(--ink);
+}
+
+.nav-link.active {
+  background: var(--teal-700);
+  color: white;
+}
+
+.nav-current-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--cream-dark);
+  border: 1px solid var(--cream-border);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.nav-current-block .pulse {
+  width: 8px;
+  height: 8px;
+  background: var(--teal-500);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+/* ======================================================
+   PAGE HEADERS
+   ====================================================== */
+.page-header {
+  padding: 48px 0 32px;
+}
+
+.page-header-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--teal-500);
+  margin-bottom: 8px;
+}
+
+.page-title {
+  font-family: var(--font-serif);
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.15;
+  margin: 0 0 12px;
+  letter-spacing: -0.5px;
+}
+
+.page-subtitle {
+  font-size: 16px;
+  color: var(--ink-muted);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 560px;
+}
+
+/* ======================================================
+   CARDS
+   ====================================================== */
+.card {
+  background: white;
+  border-radius: 16px;
+  border: 1px solid var(--cream-border);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--cream-border);
+}
+
+.card-body {
+  padding: 20px 24px;
+}
+
+/* ======================================================
+   WEEK GRID
+   ====================================================== */
+.week-grid {
+  display: grid;
+  grid-template-columns: 80px repeat(7, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.week-grid-header {
+  display: contents;
+}
+
+.week-grid-day-label {
+  grid-column: auto;
+  text-align: center;
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.week-grid-period-label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ======================================================
+   LIONEL CARDS
+   ====================================================== */
+.lionel-card {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid var(--cream-border);
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lionel-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--block-color, var(--teal-700));
+  opacity: 0.6;
+}
+
+.lionel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--block-color, var(--teal-300));
+}
+
+.lionel-card.is-current {
+  border-color: var(--teal-500);
+  box-shadow: var(--shadow-glow);
+}
+
+.lionel-card.is-current::before {
+  opacity: 1;
+}
+
+.lionel-card.is-rest {
+  background: var(--cream);
+  border-style: dashed;
+  cursor: default;
+  opacity: 0.5;
+}
+
+.lionel-card.is-rest:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.card-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.card-label {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.card-responsibilities {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.card-resp-tag {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  background: var(--cream-dark);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+}
+
+.card-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+}
+
+.card-log-count {
+  font-size: 11px;
+  color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-current-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  background: var(--teal-700);
+  color: white;
+  padding: 2px 7px;
+  border-radius: 20px;
+  animation: badgePulse 2s ease infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+/* ======================================================
+   ACTIVITY FEED
+   ====================================================== */
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.activity-item {
+  display: flex;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--cream-border);
+  align-items: flex-start;
+  transition: background 0.15s;
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-item:hover {
+  background: var(--cream);
+  margin: 0 -24px;
+  padding: 16px 24px;
+}
+
+.activity-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  border: 2px solid var(--cream-border);
+  background: white;
+}
+
+.activity-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.activity-who {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal-700);
+}
+
+.activity-text {
+  font-size: 14px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.meta-tag {
+  font-size: 11px;
+  color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.duration-tag {
+  font-size: 11px;
+  background: var(--teal-100);
+  color: var(--teal-700);
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.source-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.source-badge.agent {
+  background: var(--purple-light);
+  color: var(--purple);
+}
+
+.source-badge.gui {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+/* ======================================================
+   QUICK LOG FORM
+   ====================================================== */
+.quick-log-form {
+  background: white;
+  border-radius: 16px;
+  border: 1px solid var(--cream-border);
+  padding: 20px 24px;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 24px;
+}
+
+.quick-log-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 14px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-field.grow { flex: 1; min-width: 200px; }
+.form-field.sm { width: 100px; }
+.form-field.md { width: 160px; }
+
+.form-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.form-input, .form-select {
+  padding: 9px 12px;
+  border: 1px solid var(--cream-border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--cream);
+  transition: all 0.15s;
+  outline: none;
+  width: 100%;
+}
+
+.form-input:focus, .form-select:focus {
+  border-color: var(--teal-500);
+  box-shadow: 0 0 0 3px rgba(42,122,140,0.12);
+  background: white;
+}
+
+.form-input::placeholder {
+  color: var(--ink-faint);
+}
+
+/* ======================================================
+   BUTTONS
+   ====================================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--teal-700);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--teal-900);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(26,92,107,0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--cream-dark);
+  color: var(--ink);
+  border: 1px solid var(--cream-border);
+}
+
+.btn-secondary:hover {
+  background: var(--cream-border);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-muted);
+}
+
+.btn-ghost:hover {
+  background: var(--cream-dark);
+  color: var(--ink);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ======================================================
+   STATUS BANNER (current block / rest period)
+   ====================================================== */
+.status-banner {
+  background: white;
+  border: 1px solid var(--cream-border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 28px;
+}
+
+.status-banner.is-active {
+  border-color: var(--teal-300);
+  background: linear-gradient(135deg, white 0%, #EAF5F8 100%);
+}
+
+.status-banner.is-rest {
+  background: var(--cream);
+  border-style: dashed;
+}
+
+.status-banner-icon {
+  font-size: 36px;
+  flex-shrink: 0;
+}
+
+.status-banner-body {
+  flex: 1;
+}
+
+.status-banner-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--teal-500);
+  margin-bottom: 4px;
+}
+
+.status-banner-title {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.status-banner-subtitle {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* ======================================================
+   REPORT / CHARTS
+   ====================================================== */
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+@media (max-width: 768px) {
+  .report-grid { grid-template-columns: 1fr; }
+}
+
+.stat-card {
+  background: white;
+  border: 1px solid var(--cream-border);
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: var(--shadow-card);
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-family: var(--font-serif);
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-sublabel {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* ======================================================
+   CAPACITY BAR
+   ====================================================== */
+.capacity-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.capacity-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--cream-dark);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.capacity-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--teal-700);
+  transition: width 0.6s ease;
+}
+
+.capacity-bar-fill.high { background: var(--red); }
+.capacity-bar-fill.medium { background: var(--gold); }
+.capacity-bar-fill.low { background: var(--teal-700); }
+
+.capacity-bar-label {
+  font-size: 11px;
+  color: var(--ink-faint);
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ======================================================
+   FILTER BAR
+   ====================================================== */
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.filter-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--cream-border);
+  background: white;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-chip:hover {
+  border-color: var(--teal-300);
+  color: var(--teal-700);
+}
+
+.filter-chip.active {
+  background: var(--teal-700);
+  border-color: var(--teal-700);
+  color: white;
+}
+
+/* ======================================================
+   EMPTY STATE
+   ====================================================== */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--ink-muted);
+}
+
+.empty-state-icon {
+  font-size: 42px;
+  margin-bottom: 12px;
+}
+
+.empty-state-title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.empty-state-text {
+  font-size: 14px;
+  color: var(--ink-muted);
+  max-width: 320px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+/* ======================================================
+   WEEK SELECTOR
+   ====================================================== */
+.week-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.week-selector-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--cream-border);
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--ink-muted);
+}
+
+.week-selector-btn:hover {
+  background: var(--teal-700);
+  color: white;
+  border-color: var(--teal-700);
+}
+
+.week-selector-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 160px;
+  text-align: center;
+}
+
+/* ======================================================
+   UTILITIES
+   ====================================================== */
+.section-title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.section-subtitle {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0 0 20px;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--cream-border);
+  margin: 24px 0;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--cream-border);
+  border-top-color: var(--teal-700);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.text-muted { color: var(--ink-muted); }
+.text-faint { color: var(--ink-faint); }
+.text-teal { color: var(--teal-700); }
+.text-gold { color: var(--gold-dark); }
+
+.flex { display: flex; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.gap-20 { gap: 20px; }
+
+.mt-4  { margin-top: 4px; }
+.mt-8  { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.mb-8  { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-24 { margin-bottom: 24px; }
+
+/* ======================================================
+   ANIMATIONS
+   ====================================================== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.fade-in-delay-1 { animation-delay: 0.05s; opacity: 0; }
+.fade-in-delay-2 { animation-delay: 0.1s; opacity: 0; }
+.fade-in-delay-3 { animation-delay: 0.15s; opacity: 0; }
+
+/* ======================================================
+   RESPONSIVE
+   ====================================================== */
+@media (max-width: 900px) {
+  .week-grid {
+    grid-template-columns: 56px repeat(7, 1fr);
+    gap: 4px;
+  }
+  .main-content {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .lionel-card {
+    padding: 10px;
+    min-height: 100px;
+  }
+  .card-label {
+    font-size: 11px;
+  }
+  .card-emoji { font-size: 18px; }
+}
+
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .form-row { flex-direction: column; }
+  .form-field.sm, .form-field.md { width: 100%; }
+}
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from 'next'
+import './globals.css'
+import NavBar from '@/components/NavBar'
+
+export const metadata: Metadata = {
+  title: 'Intertemporal — 14 Lionels, One Week',
+  description: 'A scheduling and productivity system that tracks the 14 distinct versions of you across every morning and evening of the week.',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <NavBar />
+        <div className="page-wrapper">
+          <main className="main-content">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  )
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "intertemporal-system",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
+    "lucide-react": "^1.17.0",
+    "next": "16.2.7",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.7",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="app/page.tsx">
+import { BLOCKS, getCurrentBlock, getWeekStart, formatWeekStart } from '@/lib/blocks'
+import { supabase } from '@/lib/supabase'
+import WeekGrid from '@/components/WeekGrid'
+import StatusBanner from '@/components/StatusBanner'
+import { Suspense } from 'react'
+import { format, addDays } from 'date-fns'
+import { unstable_noStore as noStore } from 'next/cache'
+
+interface Responsibility {
+  id: string
+  block_id: string
+  title: string
+  fixed_start_time?: string
+  fixed_end_time?: string
+}
+
+// ─── Static shell renders instantly ──────────────────────────────────────────
+// Only the WeekDataLoader below is async — it streams in via Suspense
+export default function DashboardPage() {
+  const now = new Date()
+  const currentBlock = getCurrentBlock()
+  const weekStart = formatWeekStart(getWeekStart(now))
+  const weekStartDate = new Date(weekStart + 'T00:00:00')
+  const weekEndDate = addDays(weekStartDate, 6)
+  const weekLabel = `${format(weekStartDate, 'MMM d')} – ${format(weekEndDate, 'MMM d, yyyy')}`
+
+  return (
+    <>
+      {/* Header and status banner — no DB needed, renders immediately */}
+      <div className="page-header">
+        <p className="page-header-eyebrow">Week of {weekLabel}</p>
+        <h1 className="page-title">Your 14 Lionels</h1>
+        <p className="page-subtitle">
+          Every morning and evening is a distinct version of you — each with their own responsibilities, energy, and capacity.
+        </p>
+      </div>
+
+      <StatusBanner currentBlock={currentBlock} now={now.toISOString()} />
+
+      {/* Grid shell is static — data streams in via Suspense */}
+      <Suspense fallback={<WeekGridSkeleton />}>
+        <WeekDataLoader weekStart={weekStart} currentBlock={currentBlock} weekLabel={weekLabel} />
+      </Suspense>
+    </>
+  )
+}
+
+// ─── Async data component (only this waits for Supabase) ─────────────────────
+async function WeekDataLoader({
+  weekStart,
+  currentBlock,
+  weekLabel,
+}: {
+  weekStart: string
+  currentBlock: ReturnType<typeof getCurrentBlock>
+  weekLabel: string
+}) {
+  noStore() // opt out of full-route cache for this component only
+
+  const [{ data: responsibilities }, { data: logs }] = await Promise.all([
+    supabase
+      .from('responsibilities')
+      .select('id, block_id, title, fixed_start_time, fixed_end_time')
+      .eq('is_recurring', true),
+    supabase
+      .from('activity_logs')
+      .select('block_id')
+      .eq('week_start', weekStart),
+  ])
+
+  const logCounts: Record<string, number> = {}
+  for (const log of logs ?? []) {
+    logCounts[log.block_id] = (logCounts[log.block_id] ?? 0) + 1
+  }
+
+  return (
+    <WeekGrid
+      blocks={BLOCKS}
+      currentBlockId={currentBlock?.id ?? null}
+      responsibilities={responsibilities ?? []}
+      logCounts={logCounts}
+      weekLabel={weekLabel}
+    />
+  )
+}
+
+// ─── Inline skeleton for the grid while data loads ───────────────────────────
+function WeekGridSkeleton() {
+  return (
+    <div className="week-grid">
+      <div />
+      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+        <div key={d} className="week-grid-day-label" style={{ color: 'var(--cream-border)' }}>{d}</div>
+      ))}
+      {[0, 1].map(row => (
+        <>
+          <div key={`lbl-${row}`} />
+          {[0,1,2,3,4,5,6].map(col => (
+            <div key={`${row}-${col}`} style={{
+              background: 'var(--cream-dark)',
+              borderRadius: 12,
+              minHeight: 120,
+              animation: 'shimmer 1.4s ease infinite',
+              animationDelay: `${(row * 7 + col) * 0.04}s`,
+              opacity: 0.7,
+            }} />
+          ))}
+        </>
+      ))}
+    </div>
+  )
+}
+</file>
+
+</files>

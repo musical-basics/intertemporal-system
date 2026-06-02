@@ -136,3 +136,160 @@ export function getAllBlocks(): Block[] {
 export function getBlockById(id: string): Block | undefined {
   return BLOCKS.find(b => b.id === id)
 }
+
+export type ScheduleResolution =
+  | {
+      status: "active"
+      timezone: typeof TIMEZONE
+      at: string
+      block: Block
+      windowLabel: string
+      canSchedule: true
+      reason: null
+    }
+  | {
+      status: "blackout"
+      timezone: typeof TIMEZONE
+      at: string
+      blackout: "sleep" | "nap"
+      windowLabel: string
+      canSchedule: false
+      reason: string
+    }
+
+export function getScheduleResolution(utcDate: Date): ScheduleResolution {
+  const est = toZonedTime(utcDate, TIMEZONE)
+  const hours = est.getHours()
+  const minutes = est.getMinutes()
+  const totalMinutes = hours * 60 + minutes
+
+  const base = {
+    timezone: TIMEZONE as typeof TIMEZONE,
+    at: utcDate.toISOString(),
+  }
+
+  // Night sleep: 00:00 to 06:00
+  if (totalMinutes < 6 * 60) {
+    return {
+      ...base,
+      status: "blackout",
+      blackout: "sleep",
+      windowLabel: "12:00 AM-6:00 AM",
+      canSchedule: false,
+      reason: "Sleep window is protected."
+    }
+  }
+
+  // Nap: 14:00 to 16:00
+  if (totalMinutes >= 14 * 60 && totalMinutes < 16 * 60) {
+    return {
+      ...base,
+      status: "blackout",
+      blackout: "nap",
+      windowLabel: "2:00 PM-4:00 PM",
+      canSchedule: false,
+      reason: "Nap window is protected."
+    }
+  }
+
+  const block = getBlockForTime(utcDate)
+  if (!block) throw new Error(`No block found for ${utcDate.toISOString()}`)
+
+  const formatTime = (timeStr: string) => {
+    const [h, m] = timeStr.split(':').map(Number)
+    const suffix = h >= 12 ? 'PM' : 'AM'
+    const h12 = h % 12 === 0 ? 12 : h % 12
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`
+  }
+
+  return {
+    ...base,
+    status: "active",
+    block,
+    windowLabel: `${formatTime(block.start_time)}-${formatTime(block.end_time)}`,
+    canSchedule: true,
+    reason: null
+  }
+}
+
+export function buildIntervalSamples(start: Date, end: Date) {
+  const samples = [start]
+  const stepMs = 5 * 60 * 1000
+  let cursor = new Date(Math.ceil((start.valueOf() + 1) / stepMs) * stepMs)
+
+  while (cursor < end) {
+    samples.push(cursor)
+    cursor = new Date(cursor.valueOf() + stepMs)
+  }
+
+  samples.push(new Date(end.valueOf() - 1))
+  return samples
+}
+
+export type ScheduleCheck = {
+  schedulable: boolean
+  timezone: typeof TIMEZONE
+  startAt: string
+  endAt: string
+  reasons: string[]
+  touchedBlocks: string[]
+}
+
+export function checkScheduleWindow(startAt: string, endAt: string, responsibilities: any[]): ScheduleCheck {
+  const start = new Date(startAt)
+  const end = new Date(endAt)
+
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end <= start) {
+    return {
+      schedulable: false,
+      timezone: TIMEZONE,
+      startAt,
+      endAt,
+      reasons: ["Provide a valid startAt and endAt, with endAt after startAt."],
+      touchedBlocks: [],
+    }
+  }
+
+  const reasons = new Set<string>()
+  const touchedBlocks = new Set<string>()
+  const samples = buildIntervalSamples(start, end)
+
+  for (const sample of samples) {
+    const resolution = getScheduleResolution(sample)
+
+    if (resolution.status === "blackout") {
+      reasons.add(resolution.reason)
+      continue
+    }
+
+    touchedBlocks.add(resolution.block.label)
+
+    const est = toZonedTime(sample, TIMEZONE)
+    const minuteOfDay = est.getHours() * 60 + est.getMinutes()
+
+    const overlapping = responsibilities.find((responsibility) => {
+      if (responsibility.block_id !== resolution.block.id) return false
+      if (!responsibility.fixed_start_time || !responsibility.fixed_end_time) return false
+
+      const [startH, startM] = responsibility.fixed_start_time.split(':').map(Number)
+      const [endH, endM] = responsibility.fixed_end_time.split(':').map(Number)
+      const startMinute = startH * 60 + startM
+      const endMinute = endH * 60 + endM
+
+      return minuteOfDay >= startMinute && minuteOfDay < endMinute
+    })
+
+    if (overlapping) {
+      reasons.add(`${resolution.block.label} already has ${overlapping.title}.`)
+    }
+  }
+
+  return {
+    schedulable: reasons.size === 0,
+    timezone: TIMEZONE,
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+    reasons: Array.from(reasons),
+    touchedBlocks: Array.from(touchedBlocks),
+  }
+}

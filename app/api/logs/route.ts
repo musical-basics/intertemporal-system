@@ -29,23 +29,37 @@ export async function GET(request: NextRequest) {
   return Response.json({ logs: data ?? [], count: data?.length ?? 0 })
 }
 
+import { z } from 'zod'
+
+const logSchema = z.object({
+  activity: z.string().min(1, "'activity' is required"),
+  duration_minutes: z.number().optional().nullable(),
+  logged_at: z.string().datetime({ offset: true }).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  block_id: z.string().optional().nullable()
+})
+
 // POST /api/logs
 // Body: { activity, duration_minutes?, logged_at?, notes?, block_id? }
 export async function POST(request: NextRequest) {
   if (!validateApiKey(request)) return unauthorizedResponse()
 
-  const body = await request.json()
-  const { activity, duration_minutes, logged_at, notes, block_id } = body
+  const payload = logSchema.safeParse(await request.json())
 
-  if (!activity || typeof activity !== 'string') {
-    return Response.json({ error: "'activity' (string) is required" }, { status: 400 })
+  if (!payload.success) {
+    return Response.json(
+      {
+        error: "Invalid log payload",
+        issues: payload.error.flatten().fieldErrors,
+      },
+      { status: 400 },
+    )
   }
+
+  const { activity, duration_minutes, logged_at, notes, block_id } = payload.data
 
   // Determine the timestamp for this log entry
   const loggedAt = logged_at ? new Date(logged_at) : new Date()
-  if (isNaN(loggedAt.getTime())) {
-    return Response.json({ error: "'logged_at' must be a valid ISO 8601 timestamp" }, { status: 400 })
-  }
 
   // Determine which block this falls into
   let resolvedBlockId: string | null = block_id ?? getBlockIdForTime(loggedAt)

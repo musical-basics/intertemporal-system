@@ -1,0 +1,44 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "headerText": "Intertemporal Scheduling System — Full codebase for AI context.\nNext.js 16 + Supabase + TypeScript.\nKey concepts: 14 weekly Lionel blocks (7 mornings + 7 evenings, EST timezone), activity logging, agent API, productivity reporting.",
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "showLineNumbers": false,
+    "copyToClipboard": false
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "app/**/*.css",
+    "components/**/*.tsx",
+    "lib/**/*.ts",
+    "supabase/**/*.sql",
+    "next.config.ts",
+    "tsconfig.json",
+    "package.json",
+    ".env.local.example"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "node_modules/**",
+      ".next/**",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "tsconfig.tsbuildinfo",
+      "next-env.d.ts",
+      "public/**",
+      "app/page.module.css",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "eslint.config.mjs",
+      ".env.local",
+      "**/*.tsbuildinfo",
+      "**/*.log"
+    ]
+  }
+}

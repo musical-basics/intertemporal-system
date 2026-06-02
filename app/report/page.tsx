@@ -36,20 +36,60 @@ export default async function ReportPage({
 async function ReportDataLoader({ weekStart, thisWeek }: { weekStart: string; thisWeek: string }) {
   noStore()
 
-  const { data: logs } = await supabase
-    .from('activity_logs')
-    .select('block_id, duration_minutes, logged_at, activity')
-    .eq('week_start', weekStart)
-    .order('logged_at', { ascending: true })
+  const [{ data: logs }, { data: responsibilitiesData }] = await Promise.all([
+    supabase
+      .from('activity_logs')
+      .select('block_id, duration_minutes, logged_at, activity')
+      .eq('week_start', weekStart)
+      .order('logged_at', { ascending: true }),
+    supabase
+      .from('responsibilities')
+      .select('block_id, fixed_start_time, fixed_end_time')
+      .eq('is_recurring', true)
+  ])
 
-  const byBlock: Record<string, { total_logs: number; total_minutes: number; activities: string[] }> = {}
+  const responsibilities = responsibilitiesData ?? []
+
+  const byBlock: Record<string, { total_logs: number; total_minutes: number; capacity_minutes: number; committed_minutes: number; remaining_minutes: number; utilization: number; status: 'open' | 'balanced' | 'busy' | 'swamped'; activities: string[] }> = {}
+  
   for (const log of logs ?? []) {
     if (!byBlock[log.block_id]) {
-      byBlock[log.block_id] = { total_logs: 0, total_minutes: 0, activities: [] }
+      byBlock[log.block_id] = { total_logs: 0, total_minutes: 0, capacity_minutes: 480, committed_minutes: 0, remaining_minutes: 0, utilization: 0, status: 'open', activities: [] }
     }
     byBlock[log.block_id].total_logs++
     byBlock[log.block_id].total_minutes += log.duration_minutes ?? 0
     byBlock[log.block_id].activities.push(log.activity)
+  }
+
+  // Add responsibilities
+  for (const resp of responsibilities) {
+    if (!byBlock[resp.block_id]) {
+       byBlock[resp.block_id] = { total_logs: 0, total_minutes: 0, capacity_minutes: 480, committed_minutes: 0, remaining_minutes: 0, utilization: 0, status: 'open', activities: [] }
+    }
+    if (resp.fixed_start_time && resp.fixed_end_time) {
+       const [startH, startM] = resp.fixed_start_time.split(':').map(Number)
+       const [endH, endM] = resp.fixed_end_time.split(':').map(Number)
+       const duration = (endH * 60 + endM) - (startH * 60 + startM)
+       byBlock[resp.block_id].committed_minutes += Math.max(0, duration)
+    }
+  }
+
+  // Compute final metrics
+  for (const blockId of Object.keys(byBlock)) {
+    const b = byBlock[blockId]
+    const allocatedMinutes = b.total_minutes + b.committed_minutes
+    b.remaining_minutes = Math.max(0, b.capacity_minutes - allocatedMinutes)
+    b.utilization = Math.min(1, allocatedMinutes / b.capacity_minutes)
+
+    if (b.utilization >= 0.88 || b.remaining_minutes <= 45) {
+      b.status = 'swamped'
+    } else if (b.utilization >= 0.68) {
+      b.status = 'busy'
+    } else if (b.utilization <= 0.25) {
+      b.status = 'open'
+    } else {
+      b.status = 'balanced'
+    }
   }
 
   const totalLogs = (logs ?? []).length
